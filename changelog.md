@@ -1,20 +1,16 @@
 ## 4.19.12
 
-oops
+Policies from overridden policy branches no longer "stick around" to affect the UI
 
-Resolved  - Policies from overridden policy branches no longer "stick around" to affect the UI
+Added stockpiled resource stockpiles to resource overview
+
+Added "Set [stockpile] to [amount]" triggered unique
+
+Don't copy mod list download error to clipboard without human approval
 
 Download all possible mods when loading a game with missing mods, before notifying of problems
 
 Don't crash when finding civ-equivalent unit if the replacement unit doesn't exist in the ruleset
-
-Resolved  - Added stockpiled resource stockpiles to resource overview
-
-Added "Set [stockpile] to [amount]" triggered unique
-
-Use cached mod list to find missing mod repo
-
-Don't copy mod list download error to clipboard without human approval
 
 ## 4.19.11
 

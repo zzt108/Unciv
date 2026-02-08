@@ -213,13 +213,28 @@ class Ruleset {
                 nations.remove(it)
             }
         nations.putAll(ruleset.nations)
+        
+        /** We must remove all policies from a policy branch otherwise we have policies that cannot be picked
+         *  but are still considered "available" */
+        fun removePolicyBranch(policyBranch: PolicyBranch){
+            policyBranches.remove(policyBranch.name)
+            for (policy in policyBranch.policies)
+                policies.remove(policy.name)
+        }
+        
         ruleset.modOptions.policyBranchesToRemove
             .flatMap { policyBranchToRemove ->
-                policyBranches.filter { it.value.matchesFilter(policyBranchToRemove) }.keys
+                policyBranches.filter { it.value.matchesFilter(policyBranchToRemove) }.values
             }.toSet().forEach {
-                policyBranches.remove(it)
+                removePolicyBranch(it)
             }
+        
+        val overriddenPolicyBranches = policyBranches
+            .filter { it.key in ruleset.policyBranches }.map { it.value }
+        for (policyBranch in overriddenPolicyBranches) removePolicyBranch(policyBranch
+        )
         policyBranches.putAll(ruleset.policyBranches)
+        
         policies.putAll(ruleset.policies)
 
         // Remove the policies

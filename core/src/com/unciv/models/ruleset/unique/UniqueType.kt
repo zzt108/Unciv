@@ -686,7 +686,7 @@ enum class UniqueType(
     CanOnlyBeBuiltOnTile("Can only be built on [tileFilter] tiles", UniqueTarget.Improvement),
     CannotBuildOnTile("Cannot be built on [tileFilter] tiles", UniqueTarget.Improvement),
     CanOnlyImproveResource("Can only be built to improve a resource", UniqueTarget.Improvement),
-    NoFeatureRemovalNeeded("Does not need removal of [tileFilter]", UniqueTarget.Improvement),
+    NoFeatureRemovalNeeded("Does not need removal of [terrainFeature]", UniqueTarget.Improvement),
     RemovesFeaturesIfBuilt("Removes removable features when built", UniqueTarget.Improvement),
 
     DefensiveBonus("Gives a defensive bonus of [relativeAmount]%", UniqueTarget.Improvement, 

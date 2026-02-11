@@ -150,14 +150,14 @@ class CityConquestFunctions(val city: City) {
         diplomaticRepercussionsForConqueringCity(oldCiv, conqueringCiv)
 
         conquerCity(conqueringCiv, oldCiv, conqueringCiv)
-
-        city.isPuppet = true
+        makePuppet()
         city.cityStats.update()
+    }
+    
+    private fun makePuppet(){
+        city.isPuppet = true
         // The city could be producing something that puppets shouldn't, like units
-        city.cityConstructions.currentConstructionIsUserSet = false
-        city.cityConstructions.inProgressConstructions.clear() // undo all progress of the previous civ on units etc.
-        city.cityConstructions.constructionQueue.clear()
-        city.cityConstructions.chooseNextConstruction()
+        city.cityConstructions.removeAll()
     }
 
     fun annexCity() {
@@ -327,12 +327,7 @@ class CityConquestFunctions(val city: City) {
 
         if (city.civ.gameInfo.isReligionEnabled()) city.religion.removeUnknownPantheons()
 
-        if (newCiv.hasUnique(UniqueType.MayNotAnnexCities)) {
-            city.isPuppet = true
-            city.cityConstructions.currentConstructionIsUserSet = false
-            city.cityConstructions.constructionQueue.clear()
-            city.cityConstructions.chooseNextConstruction()
-        }
+        if (newCiv.hasUnique(UniqueType.MayNotAnnexCities)) makePuppet()
 
         city.tryUpdateRoadStatus()
         city.cityStats.update()

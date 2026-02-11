@@ -1814,6 +1814,8 @@ Simple unique parameters are explained by mouseover. Complex parameters are expl
 
 	Example: "Creates a [Trading Post] improvement on a specific tile"
 
+	This unique does not support conditionals.
+
 	Applicable to: Building
 
 ??? example  "Can carry [amount] extra [mapUnitFilter] units"

@@ -1,31 +1,18 @@
 ## 4.19.13
 
-Resolved  - Specific uniques for gold purchase cost always override default gold cost
+Clear diplomatic modifiers and countdowns to resurrected civs
 
-Fixed console launcher
+Puppeted cities remove "marked for improvement by building" markers correctly
 
-Resolved  - Puppeted cities remove "marked for improvement by building" markers correctly
-
-"Does not need removal of [terrainFeature]" has correct parameter type - See 
-
-Resolved  - global uniques can accept unit trigger conditions when placed on units
-
-chore: Cleaned multiple "remove building" implementations
-
-Log test output round 4
-
-Log test output round 3
-
-Log test output round 2
-
-Resolved 
-
-ci: Send a github message containing failed test text
+Modding:
+- Specific uniques for gold purchase cost always override default cost
+- Global uniques can accept unit trigger conditions when placed on units
 
 By unciv-loof:
-- Do not consider unexplored tiles in border expansion logic 
-- Fix border expansion logic not properly considering neighboring bonus resources at the edge of city work range 
-- Slightly prioritize contested tiles for border expansion 
+- Border expansion logic 
+   - considers neighboring bonus resources at the edge of work range
+   - does not consider unexplored tiles  
+   - slightly prioritizes contested tiles 
 
 ## 4.19.12
 

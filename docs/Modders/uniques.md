@@ -2620,6 +2620,8 @@ Simple unique parameters are explained by mouseover. Complex parameters are expl
 
 	Due to performance considerations, this unique is cached, thus conditionals that may change within a turn may not work.
 
+	This unique does not support conditionals.
+
 	Applicable to: Terrain
 
 ??? example  "Grants [promotion] ([comment]) to adjacent [mapUnitFilter] units for the rest of the game"

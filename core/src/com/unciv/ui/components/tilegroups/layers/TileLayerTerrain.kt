@@ -29,8 +29,9 @@ class TileLayerTerrain(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup,
 
     private fun getTerrainImageLocations(terrainSequence: Sequence<String>): List<String> {
         val allTerrains = terrainSequence.joinToString("+")
-        if (strings.tileSetConfig.ruleVariants.containsKey(allTerrains))
-            return strings.tileSetConfig.ruleVariants[allTerrains]!!.map { strings.getTile(it) }
+        strings.tileSetConfig.resolveRuleVariant(allTerrains)?.let {
+            return it.map { strings.getTile(it) }
+        }
         val allTerrainTile = strings.getTile(allTerrains)
         return if (ImageGetter.imageExists(allTerrainTile)) listOf(allTerrainTile)
         else terrainSequence.map { strings.orFallback { getTile(it) } }.toList()
@@ -87,13 +88,13 @@ class TileLayerTerrain(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup,
         //   So we default to placing them over everything else.
         // If there is no explicit list, then we can know to place them between the terrain and the improvement
         return when {
-            strings.tileSetConfig.ruleVariants[allTogether] != null -> baseHexagon.apply { 
-                addAll(strings.tileSetConfig.ruleVariants[allTogether]!!.map { strings.getTile(it) })
+            strings.tileSetConfig.resolveRuleVariant(allTogether) != null -> baseHexagon.apply {
+                addAll(strings.tileSetConfig.resolveRuleVariant(allTogether)!!.map { strings.getTile(it) })
                 addAll(edgeImages)
-            } 
+            }
             ImageGetter.imageExists(allTogetherLocation) -> baseHexagon.apply { add(allTogetherLocation); addAll(edgeImages) }
             tile.naturalWonder != null -> getNaturalWonderBackupImage(baseHexagon) + edgeImages
-            else -> baseHexagon.apply { 
+            else -> baseHexagon.apply {
                 addAll(getTerrainImageLocations(terrainImages))
                 addAll(edgeImages)
                 addAll(getImprovementAndResourceImages(resourceAndImprovementSequence))

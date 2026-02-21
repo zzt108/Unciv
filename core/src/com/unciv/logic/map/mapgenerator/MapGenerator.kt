@@ -233,7 +233,7 @@ class MapGenerator(val ruleset: Ruleset, private val coroutineScope: CoroutineSc
 
                 else -> return null
             }
-            return map.getIfTileExistsOrNull(mirrorTileVector.x.toInt(), mirrorTileVector.y.toInt())
+            return map.getIfTileExistsOrNull(mirrorTileVector.x, mirrorTileVector.y)
         }
         
         fun copyTile(tile: Tile, mirroringType: String) {

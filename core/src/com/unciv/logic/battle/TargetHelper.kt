@@ -121,7 +121,7 @@ object TargetHelper {
         
         if (combatant is MapUnitCombatant) {
             val gameContext = GameContext(
-                unit = (combatant as? MapUnitCombatant)?.unit, tile = tile, 
+                unit = combatant.unit, tile = tile, 
                 ourCombatant = combatant, theirCombatant = tileCombatant, combatAction = CombatAction.Attack)
 
             if (combatant.hasUnique(UniqueType.CannotAttack, gameContext))

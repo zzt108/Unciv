@@ -489,6 +489,7 @@ class MapGenerator(val ruleset: Ruleset, private val coroutineScope: CoroutineSc
         // List is OK here as it's only sequentially scanned
         val landTerrains = baseTerrainPicker.filter { it.terrain.type == TerrainType.Land && !it.rareFeature }
         val noTerrainUniques = landTerrains.none { it.isConstrained}
+        val elevationTerrains = baseTerrainPicker.filter {  it.occursInChains }.mapTo(mutableSetOf()) { it.name }
 
         for (tile in tileMap.values.asSequence()) {
             if (tile.isWater || tile.baseTerrain in elevationTerrains)

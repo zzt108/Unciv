@@ -1,14 +1,10 @@
 ## 4.19.15
 
-More explicit warning about large maps causing memory crashes - see 
+More explicit warning about large maps causing memory crashes 
 
-Catch base terrains with occursOn in ruleset validation - see 
+Catch base terrains with occursOn in ruleset validation
 
-4.19.14-patch1
-
-Resolved  - Removing improvement-creating buildings where the improvement is not in any tile in the city, no longer crashes
-
-4.19.14-patch1
+Removing improvement-creating buildings where the no city tile has the improvement, no longer crashes
 
 Cities can attack revealed invisible units
 
@@ -17,7 +13,7 @@ By Ambeco:
 - Jungles again no longer spawn on hills 
 - MapGeneration ignores rareFeatures when placing normal tiles 
 
-Add max(), min() to expression parser - By AutumnPizazz
+Add max(), min() functions to countable expressions - By AutumnPizazz
 
 ## 4.19.14
 

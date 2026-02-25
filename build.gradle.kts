@@ -188,7 +188,7 @@ project(":core") {
         "implementation"("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
         "implementation"("org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
 
-        "implementation"("io.github.yairm210:purity-annotations:1.3.0")
+        "implementation"("io.github.yairm210:purity-annotations:1.3.4")
 
         "implementation"("io.ktor:ktor-client-core:$ktorVersion")
         "implementation"("io.ktor:ktor-client-cio:$ktorVersion")

@@ -412,7 +412,7 @@ enum class Countables(
                     "${it.arityRange.first} argument${if (it.arityRange.first != 1) "s" else ""}"
                 else 
                     "${it.arityRange.first} to ${it.arityRange.last} arguments"
-                "  - `${it.symbol}()` - $arityText"
+                " - `${it.symbol}(${List(it.arityRange.first){"expression"}.joinToString(",")})`"
             }.toTypedArray(),
         )
     }

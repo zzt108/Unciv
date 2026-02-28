@@ -57,13 +57,17 @@ class ResourcesOverviewTab(
 
     private val resourceDrilldown: ResourceSupplyList = viewingPlayer.detailedCivResources
     private val extraDrilldown: ResourceSupplyList = getExtraDrilldown()
-    private val allResources = ResourceSupplyList().apply { add(resourceDrilldown); add(extraDrilldown) }
+    private val allResources = resourceDrilldown.asSequence() + extraDrilldown  // Do not materialize into another ResourceSupplyList, we have intentional zero amounts
 
     // Order of source ResourceSupplyList: by tiles, enumerating the map in that spiral pattern
     // UI should not surprise player, thus we need a deterministic and guessable order
-    private val resources: List<TileResource> = allResources.asSequence()
+    private val resources: List<TileResource> = allResources
         .map { it.resource }
-        .filter { it.resourceType != ResourceType.Bonus && !it.hasUnique(UniqueType.NotShownOnWorldScreen) }
+        .filter {
+            it.resourceType != ResourceType.Bonus &&
+            !it.hasUnique(UniqueType.NotShownOnWorldScreen, viewingPlayer.state) &&
+            !it.isCityWide // These are Civ-wide resources, so don't show the city-wide ones.
+        }
         .distinct()
         .sortedWith(
             compareBy<TileResource> { it.resourceType }
@@ -78,7 +82,7 @@ class ResourcesOverviewTab(
     private fun ResourceSupplyList.getLabel(resource: TileResource, origin: String): Label? {
         fun isAlliedAndUnimproved(tile: Tile): Boolean {
             val owner = tile.getOwner() ?: return false
-            if (owner != viewingPlayer && !(owner.isCityState && owner.getAllyCiv() == viewingPlayer.civName)) return false
+            if (owner != viewingPlayer && !(owner.isCityState && owner.allyCiv == viewingPlayer)) return false
             return tile.countAsUnimproved()
         }
         val amount = get(resource, origin)?.amount ?: return null
@@ -86,7 +90,7 @@ class ResourcesOverviewTab(
             else amount.toLabel()
         if (origin == ExtraInfoOrigin.Unimproved.name)
             label.onClick { overviewScreen.showOneTimeNotification(
-                gameInfo.getExploredResourcesNotification(viewingPlayer, resource.name, filter = ::isAlliedAndUnimproved)
+                gameInfo.getExploredResourcesNotification(viewingPlayer, resource, filter = ::isAlliedAndUnimproved)
             ) }
         return label
     }
@@ -179,17 +183,30 @@ class ResourcesOverviewTab(
         for (resource in resources) {
             add(resourceDrilldown.getTotalLabel(resource))
         }
-        addSeparator()
+        
 
         // Separate rows for origins not part of the totals
-        for (origin in extraOrigins) {
-            add(origin.horizontalCaption.toLabel().apply {
-                addTooltip(origin.tooltip, tooltipSize, tipAlign = Align.left)
-            }).left()
-            for (resource in resources) {
-                add(extraDrilldown.getLabel(resource, origin.name))
+        if (extraOrigins.any()) {
+            addSeparator()
+            for (origin in extraOrigins) {
+                add(origin.horizontalCaption.toLabel().apply {
+                    addTooltip(origin.tooltip, tooltipSize, tipAlign = Align.left)
+                }).left()
+                for (resource in resources) {
+                    add(extraDrilldown.getLabel(resource, origin.name))
+                }
+                row()
             }
-            row()
+        }
+        
+        // A row for stockpiles resources if required
+        if (resources.any { it.isStockpiled }){
+            addSeparator()
+            add("Stockpiled resources".toLabel()).left()
+            for (resource in resources) {
+                if (!resource.isStockpiled) add()
+                else add(viewingPlayer.getResourceAmount(resource).toLabel())
+            }
         }
     }
 
@@ -243,10 +260,12 @@ class ResourcesOverviewTab(
         overviewScreen.resizePage(this)  // Without the height is miscalculated - shouldn't be
     }
 
-    private fun Tile.countAsUnimproved(): Boolean = resource != null &&
-            tileResource.resourceType != ResourceType.Bonus &&
-            hasViewableResource(viewingPlayer) &&
+    private fun Tile.countAsUnimproved(): Boolean {
+        val resource = tileResource
+        return viewingPlayer.canSeeResource(resource) &&
+            resource.resourceType != ResourceType.Bonus &&
             !providesResources(viewingPlayer)
+    }
 
     private fun getExtraDrilldown(): ResourceSupplyList {
         val newResourceSupplyList = ResourceSupplyList(keepZeroAmounts = true)
@@ -254,7 +273,7 @@ class ResourcesOverviewTab(
         fun City.addUnimproved() {
             for (tile in getTiles())
                 if (tile.countAsUnimproved())
-                    newResourceSupplyList.add(tile.tileResource, ExtraInfoOrigin.Unimproved.name)
+                    newResourceSupplyList.add(tile.tileResource!!, ExtraInfoOrigin.Unimproved.name)
         }
 
         // Show resources relevant to WTLK day and/or needing improvement
@@ -272,12 +291,12 @@ class ResourcesOverviewTab(
 
         for (otherCiv in viewingPlayer.getKnownCivs()) {
             // Show resources received through trade
-            for (trade in otherCiv.tradeRequests.filter { it.requestingCiv == viewingPlayer.civName })
+            for (trade in otherCiv.tradeRequests.filter { it.requestingCiv == viewingPlayer.civID })
                 for (offer in trade.trade.theirOffers.filter { it.type == TradeOfferType.Strategic_Resource || it.type == TradeOfferType.Luxury_Resource })
                     newResourceSupplyList.add(gameInfo.ruleset.tileResources[offer.name]!!, ExtraInfoOrigin.TradeOffer.name, offer.amount)
 
             // Show resources your city-state allies have left unimproved
-            if (!otherCiv.isCityState || otherCiv.getAllyCiv() != viewingPlayer.civName) continue
+            if (!otherCiv.isCityState || otherCiv.allyCiv != viewingPlayer) continue
             for (city in otherCiv.cities)
                 city.addUnimproved()
         }
@@ -285,7 +304,7 @@ class ResourcesOverviewTab(
         /** Show unlocked **strategic** resources even if you have no access at all */
         for (resource in viewingPlayer.gameInfo.ruleset.tileResources.values) {
             if (resource.resourceType != ResourceType.Strategic) continue
-            if (viewingPlayer.tech.isRevealed(resource))
+            if (viewingPlayer.canSeeResource(resource))
                 newResourceSupplyList.add(resource, "No source", 0)
         }
 

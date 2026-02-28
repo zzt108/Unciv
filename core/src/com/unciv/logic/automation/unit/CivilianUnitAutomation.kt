@@ -5,13 +5,17 @@ import com.unciv.logic.civilization.managers.ReligionState
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.UnitActionType
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueTriggerActivation
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionModifiers
+import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionModifiers.canUse
 import com.unciv.ui.screens.worldscreen.unit.actions.UnitActions
+import yairm210.purity.annotations.Readonly
 
 object CivilianUnitAutomation {
 
+    @Readonly
     fun shouldClearTileForAddInCapitalUnits(unit: MapUnit, tile: Tile) =
         tile.isCityCenter() && tile.getCity()!!.isCapital()
         && !unit.hasUnique(UniqueType.AddInCapital)
@@ -19,11 +23,17 @@ object CivilianUnitAutomation {
 
     fun automateCivilianUnit(unit: MapUnit, dangerousTiles: HashSet<Tile>) {
         // To allow "found city" actions that can only trigger a limited number of times
-        val settlerUnique = 
-            UnitActionModifiers.getUsableUnitActionUniques(unit, UniqueType.FoundCity).firstOrNull() ?: 
-            UnitActionModifiers.getUsableUnitActionUniques(unit, UniqueType.FoundPuppetCity).firstOrNull()
         
-        if (settlerUnique != null)
+        // Slightly modified getUsableUnitActionUniques() to allow for settlers with *conditional* settling uniques
+        @Readonly
+        fun hasSettlerAction(uniqueType: UniqueType) =
+            unit.getMatchingUniques(uniqueType, GameContext.IgnoreConditionals)
+                .filter { unique -> !unique.hasModifier(UniqueType.UnitActionExtraLimitedTimes) }
+                .any { canUse(unit, it) }
+        
+        val hasSettlerUnique = hasSettlerAction(UniqueType.FoundCity) || hasSettlerAction(UniqueType.FoundPuppetCity)
+        
+        if (hasSettlerUnique && !(unit.civ.isCityState && unit.isMilitary()))
             return SpecificUnitAutomation.automateSettlerActions(unit, dangerousTiles)
 
         if (tryRunAwayIfNeccessary(unit)) return
@@ -53,6 +63,13 @@ object CivilianUnitAutomation {
             && unit.civ.religionManager.mayFoundReligionAtAll()
         )
             return ReligiousUnitAutomation.foundReligion(unit)
+        
+        if (unit.hasUnique(UniqueType.MayFoundReligion) && unit.civ.isCityState){
+            // We have literally nothing to do with this unit, at least stop costing money
+            unit.disband()
+            return 
+        }
+            
 
         if (unit.hasUnique(UniqueType.MayEnhanceReligion)
             && unit.civ.religionManager.religionState < ReligionState.EnhancedReligion
@@ -72,8 +89,6 @@ object CivilianUnitAutomation {
             return
         if (unit.cache.hasCitadelPlacementUnique && SpecificUnitAutomation.automateCitadelPlacer(unit))
             return
-        if (unit.cache.hasCitadelPlacementUnique || unit.cache.hasStrengthBonusInRadiusUnique)
-            return SpecificUnitAutomation.automateGreatGeneralFallback(unit)
 
         if (unit.civ.religionManager.maySpreadReligionAtAll(unit))
             return ReligiousUnitAutomation.automateMissionary(unit)
@@ -97,9 +112,9 @@ object CivilianUnitAutomation {
         // TODO: This could be more complex to walk to the city state that is most beneficial to
         //  also have more influence.
         if (unit.hasUnique(UniqueType.CanTradeWithCityStateForGoldAndInfluence)
-            // Don't wander around with the great merchant when at war. Barbs might also be a
-            // problem, but hopefully by the time we have a great merchant, they're under control.
-            && !unit.civ.isAtWar()
+            // There's a risk our merchant gets intercepted and killed by the enemy during war.
+            // If such happens, it is a failure of our military unit movement to protect our merchant.
+            // Barbs might also be a problem, but hopefully by the time we have a great merchant, they're under control.
             && isLateGame
         ) {
             val tradeMissionCanBeConductedEventually =
@@ -158,10 +173,11 @@ object CivilianUnitAutomation {
         return // The AI doesn't know how to handle unknown civilian units
     }
 
-    private fun isLateGame(civ: Civilization): Boolean {
+    @Readonly
+    fun isLateGame(civ: Civilization): Boolean {
         val researchCompletePercent =
             (civ.tech.researchedTechnologies.size * 1.0f) / civ.gameInfo.ruleset.technologies.size
-        return researchCompletePercent >= 0.6f
+        return researchCompletePercent >= 0.55f
     }
 
     /** Returns whether the civilian spends its turn hiding and not moving */
@@ -196,11 +212,22 @@ object CivilianUnitAutomation {
             unit.movement.moveToTile(defensiveUnit)
             return
         }
-        val tileFurthestFromEnemy = reachableTiles.keys
-            .filter { unit.movement.canMoveTo(it) && unit.getDamageFromTerrain(it) < unit.health }
-            .maxByOrNull { unit.civ.threatManager.getDistanceToClosestEnemyUnit(unit.getTile(), 4, false) }
-            ?: return // can't move anywhere!
-        unit.movement.moveToTile(tileFurthestFromEnemy)
-    }
 
+        val unitTile = unit.getTile()
+        val dangerousTiles = unit.civ.threatManager.getDangerousTiles(unit)
+        val tileClosestToDanger = dangerousTiles
+            // Priotirize capture threat over ranged attack
+            .sortedByDescending { unit.civ.threatManager.getEnemyUnitsOnTiles(listOf(it)).isNotEmpty() }
+            .minByOrNull { it.aerialDistanceTo(unitTile) } ?: unitTile
+        val tileFurthestFromDanger = reachableTiles.keys
+            .filter {
+                unit.movement.canMoveTo(it)
+                    && unit.getDamageFromTerrain(it) < unit.health
+                    && it !in dangerousTiles }
+            .sortedWith(compareByDescending<Tile> { it.aerialDistanceTo(tileClosestToDanger) } // As far away from threat
+                .thenByDescending { it.isFriendlyTerritory(unit.civ) }) // Priotirize friendly territory
+            .firstOrNull() ?: return // can't move anywhere!
+
+        unit.movement.moveToTile(tileFurthestFromDanger)
+    }
 }

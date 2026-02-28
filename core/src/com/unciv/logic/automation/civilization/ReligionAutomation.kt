@@ -8,10 +8,10 @@ import com.unciv.logic.map.tile.Tile
 import com.unciv.models.Counter
 import com.unciv.models.ruleset.Belief
 import com.unciv.models.ruleset.BeliefType
-import com.unciv.models.ruleset.Victory
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.stats.Stat
+import yairm210.purity.annotations.Readonly
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.random.Random
@@ -206,7 +206,7 @@ object ReligionAutomation {
     // endregion
 
     // region rate beliefs
-
+    @Readonly
     fun rateBelief(civInfo: Civilization, belief: Belief): Float {
         var score = 0f // Roughly equivalent to the sum of stats gained across all cities
 
@@ -229,29 +229,43 @@ object ReligionAutomation {
 
         if (belief.type == BeliefType.Pantheon)
             score *= 0.9f
+        
+        score *= belief.getWeightForAiDecision(GameContext(civInfo))
 
         return score
     }
 
+    @Readonly
     private fun beliefBonusForTile(belief: Belief, tile: Tile, city: City): Float {
         var bonusYield = 0f
         for (unique in belief.uniqueObjects) {
             when (unique.type) {
-                UniqueType.StatsFromObject -> if ((tile.matchesFilter(unique.params[1])
-                    && !(tile.lastTerrain.hasUnique(UniqueType.ProductionBonusWhenRemoved) && tile.lastTerrain.matchesFilter(unique.params[1])) //forest pantheons are bad, as we want to remove the forests
-                    || (tile.resource != null && (tile.tileResource.matchesFilter(unique.params[1]) || tile.tileResource.isImprovedBy(unique.params[1]))))) //resource pantheons are good, as we want to work the tile anyways
-                    bonusYield += unique.stats.values.sum()
-                UniqueType.StatsFromTilesWithout ->
-                    if (city.matchesFilter(unique.params[3])
-                        && tile.matchesFilter(unique.params[1])
-                        && !tile.matchesFilter(unique.params[2])
+                UniqueType.StatsFromObject -> {
+                    val resource = tile.tileResource
+                    if (tile.matchesFilter(unique.params[1])) {
+                        if (!tile.lastTerrain.hasUnique(UniqueType.ProductionBonusWhenRemoved) ||
+                            !tile.lastTerrain.matchesFilter(unique.params[1]) //forest pantheons are bad, as we want to remove the forests
+                        ) bonusYield += unique.stats.values.sum()
+                        else if (resource != null && (resource.matchesFilter(unique.params[1]) ||
+                                resource.isImprovedBy(unique.params[1]))
+                        ) bonusYield += unique.stats.values.sum() //resource pantheons are good, as we want to work the tile anyways
+                    } else if (resource != null && (resource.matchesFilter(unique.params[1]) ||
+                            resource.isImprovedBy(unique.params[1]))
+                    ) bonusYield += unique.stats.values.sum() //resource pantheons are good, as we want to work the tile anyways
+                }
+                UniqueType.StatsFromTilesWithout -> {
+                    if (city.matchesFilter(unique.params[3]) &&
+                        tile.matchesFilter(unique.params[1]) &&
+                        !tile.matchesFilter(unique.params[2])
                     ) bonusYield += unique.stats.values.sum()
+                }
                 else -> {}
             }
         }
         return bonusYield
     }
 
+    @Readonly
     private fun beliefBonusForCity(civInfo: Civilization, belief: Belief, city: City): Float {
         var score = 0f
         val ruleSet = civInfo.gameInfo.ruleset
@@ -304,6 +318,7 @@ object ReligionAutomation {
         return score
     }
 
+    @Readonly
     private fun beliefBonusForPlayer(civInfo: Civilization, belief: Belief): Float {
         var score = 0f
         val numberOfFoundedReligions = civInfo.gameInfo.civilizations.count {
@@ -344,10 +359,7 @@ object ReligionAutomation {
                 else 1f
             // Some city-filters are modified by personality (non-enemy foreign cities)
             score += modifier * when (unique.type) {
-                UniqueType.KillUnitPlunderNearCity ->
-                    unique.params[0].toFloat() * //can be very strong, but a low weight for now as the AI currently isn't farming barb camp
-                        if (civInfo.wantsToFocusOn(Victory.Focus.Military)) 0.5f
-                        else 0.25f
+                UniqueType.KillUnitPlunderNearCity -> 0f //can be very strong, but the AI currently isn't farming barb camps
                 UniqueType.BuyUnitsForAmountStat, UniqueType.BuyBuildingsForAmountStat ->
                     if (civInfo.religionManager.religion != null
                         && civInfo.religionManager.religion!!.followerBeliefUniqueMap.getUniques(unique.type).any()
@@ -370,10 +382,7 @@ object ReligionAutomation {
                 UniqueType.StatsWhenAdoptingReligion ->
                     unique.stats.values.sum() / 50f
                 UniqueType.RestingPointOfCityStatesFollowingReligionChange ->
-                    if (civInfo.wantsToFocusOn(Victory.Focus.CityStates))
-                        unique.params[0].toFloat() / 4f
-                    else
-                        unique.params[0].toFloat() / 8f
+                    unique.params[0].toFloat() / 8f
                 UniqueType.StatsFromGlobalCitiesFollowingReligion ->
                     unique.stats.values.sum() * 2f //free yields that are potentially more than our own number of cities would allow
                 UniqueType.StatsFromGlobalFollowers ->
@@ -415,7 +424,7 @@ object ReligionAutomation {
         // line 4426 through 4870.
         // This is way too much work for now, so I'll just choose a random pantheon instead.
         // Should probably be changed later, but it works for now.
-        val chosenPantheon = chooseBeliefOfType(civInfo, BeliefType.Pantheon)
+        val chosenPantheon = pickBeliefOfType(civInfo, BeliefType.Pantheon)
             ?: return // panic!
         civInfo.religionManager.chooseBeliefs(
             listOf(chosenPantheon),
@@ -425,16 +434,17 @@ object ReligionAutomation {
 
     private fun foundReligion(civInfo: Civilization) {
         if (civInfo.religionManager.religionState != ReligionState.FoundingReligion) return
-        val availableReligionIcons = civInfo.gameInfo.ruleset.religions
-            .filterNot { civInfo.gameInfo.religions.values.map { religion -> religion.name }.contains(it) }
-        val favoredReligion = civInfo.nation.favoredReligion
-        val religionIcon =
-            if (favoredReligion != null && favoredReligion in availableReligionIcons
-                && (1..10).random() <= 5) favoredReligion
-            else availableReligionIcons.randomOrNull()
-                ?: return // Wait what? How did we pass the checking when using a great prophet but not this?
+        val usedReligions = civInfo.gameInfo.religions.values.mapTo(mutableSetOf()) { it.name }
+        val availableReligions = civInfo.gameInfo.ruleset.religions.filterNot { it in usedReligions }
+        val favoredReligion = civInfo.nation.favoredReligion?.takeIf { it in availableReligions }
+        val allFavoredReligions = civInfo.gameInfo.civilizations.mapNotNullTo(mutableSetOf()) { it.nation.favoredReligion}
+        val nonFavoredReligions = availableReligions.filterNot { it in allFavoredReligions }
+        val chosenReligion = favoredReligion
+            ?: nonFavoredReligions.randomOrNull() // allow other civs to found their own favoured religion when possible
+            ?: availableReligions.randomOrNull()
+            ?: return // Wait what? How did we pass the checking when using a great prophet but not this?
 
-        civInfo.religionManager.foundReligion(religionIcon, religionIcon)
+        civInfo.religionManager.foundReligion(chosenReligion, chosenReligion)
 
         val chosenBeliefs = chooseBeliefs(civInfo, civInfo.religionManager.getBeliefsToChooseAtFounding()).toList()
         civInfo.religionManager.chooseBeliefs(chosenBeliefs)
@@ -465,20 +475,21 @@ object ReligionAutomation {
             if (belief == BeliefType.None) continue
             repeat(beliefsToChoose[belief]) {
                 chosenBeliefs.add(
-                    chooseBeliefOfType(civInfo, belief, chosenBeliefs) ?: return@repeat
+                    pickBeliefOfType(civInfo, belief, chosenBeliefs) ?: return@repeat
                 )
             }
         }
         return chosenBeliefs
     }
 
-    private fun chooseBeliefOfType(civInfo: Civilization, beliefType: BeliefType, additionalBeliefsToExclude: HashSet<Belief> = hashSetOf()): Belief? {
+    @Readonly
+    private fun pickBeliefOfType(civInfo: Civilization, beliefType: BeliefType, additionalBeliefsToExclude: HashSet<Belief> = hashSetOf()): Belief? {
         return civInfo.gameInfo.ruleset.beliefs.values
             .filter {
                 (it.type == beliefType || beliefType == BeliefType.Any)
                     && !additionalBeliefsToExclude.contains(it)
                     && civInfo.religionManager.getReligionWithBelief(it) == null
-                    && it.getMatchingUniques(UniqueType.OnlyAvailable, StateForConditionals.IgnoreConditionals)
+                    && it.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals)
                     .none { unique -> !unique.conditionalsApply(civInfo.state) }
             }
             .maxByOrNull { rateBelief(civInfo, it) }

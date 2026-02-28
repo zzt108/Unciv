@@ -13,7 +13,7 @@ The game only knows how to recognize existing definitions, so you can't add *new
 There are three main kinds of mods:
 
 -   **Extension mods** - these add new nations/units/buildings/resources to a base ruleset - can be either to the default ruleset, or to a base ruleset mod. Easy to do and probably the better place to get started - for example, [creating a new Civilization](Making-a-new-Civilization.md)
--   **Base Ruleset mods** - these replace the entire existing ruleset - tech tree, units, policies, nations etc - to give an entirely different experience than the base game. These generally require quite a bit of work, but give a whole new experience, and so are the most popular. [A minimal example can be found here](https://github.com/yairm210/Unciv-minimal-base-ruleset) as a template to build off of ("Use this template" green button in top right, "Create a new repository")
+-   **Base Ruleset mods** - these replace the entire existing ruleset - tech tree, units, policies, nations etc - to give an entirely different experience than the base game. These generally require quite a bit of work, but give a whole new experience, and so are the most popular. [A minimal example can be found here](https://github.com/yairm210/Unciv-minimal-base-ruleset) as a template to build off of ("Use this template" green button in top right, "Create a new repository"). For requirements, see [Requirements](Mod-file-structure/1-Overview.md#requirements-for-base-rulesets)
 -   **Ruleset-agnostic mods** - these do not contain any ruleset-related jsons, but instead contain other affects. Audiovisual mods (including tilesets, unitsets, and UI skins) and map mods are in this category.
 
 Creating and editing mods from your phone is NOT RECOMMENDED - it's *much easier* using a desktop device!
@@ -60,6 +60,12 @@ When you've finished making your map in the Map Editor, save it, and it will be 
 
 Copy it to a `/maps` folder in your mod, and you're done!
 
+## Translations
+
+Just like Unciv itself, mods can be translated into any or all of the languages core Unciv supports.
+
+For details, see [Translation generation - for modders](../Translating/Translation-mods.md).
+
 ## Getting your mod out there
 
 In order to make your mod downloadable by anyone, you need to create a Github repository (instructions [here](https://docs.github.com/en/github/getting-started-with-github/create-a-repo))
@@ -91,7 +97,7 @@ Optionally add one or more of the following topics to mark your mod as belonging
 -   `unciv-mod-modsofmods` (for mods extending another mod's ruleset)
 
 When you open Unciv's Mod Manager, it will query Github's [list of repos with that topic](https://github.com/topics/unciv-mod), and now YOUR repo will appear there!
-The categories will appear als annotations on the mod buttons, and the user can filter for them. They are not required for the game to use the content - e.g. you can still load maps from mods lacking the unciv-mod-maps topic.
+The categories will appear as annotations on the mod buttons, and the user can filter for them. They are not required for the game to use the content - e.g. you can still load maps from mods lacking the unciv-mod-maps topic.
 If you want new categories, github will accept any topic, but you'll have to ask the Unciv team to enable them in the game.
 
 If you feel there should be additional topics supported in-game, then the course of action is as follows:

@@ -6,7 +6,7 @@ import com.unciv.models.ruleset.Speed
 
 class GameParameters : IsPartOfGameInfoSerialization { // Default values are the default new game
     var difficulty = "Prince"
-    var speed = Speed.DEFAULT
+    var speed: String = Speed.DEFAULT // Not an instance of class Speed
 
     var randomNumberOfPlayers = false
     var minNumberOfPlayers = 3
@@ -36,12 +36,18 @@ class GameParameters : IsPartOfGameInfoSerialization { // Default values are the
     var victoryTypes: ArrayList<String> = arrayListOf()
     var startingEra = "Ancient era"
 
+    var showVictoryStats = true
+
     // Multiplayer parameters
     var isOnlineMultiplayer = false
     var multiplayerServerUrl: String? = null
     var anyoneCanSpectate = true
     /** After this amount of minutes, anyone can choose to 'skip turn' of the current player to keep the game going */
     var minutesUntilSkipTurn = 60 * 24
+    /** Initial players' timer to play before they can be forced to resign permanently*/
+    var minutesUntilForceResign = 3 * 24 * 60
+    /** Time a player recover on their timer before they can be forced to resign. Time isn't added if the player get their turn skipped*/
+    var minutesRecoveredPerTurn = 60 * 24
 
     var baseRuleset: String = BaseRuleset.Civ_V_GnK.fullName
     var mods = LinkedHashSet<String>()
@@ -75,6 +81,7 @@ class GameParameters : IsPartOfGameInfoSerialization { // Default values are the
         parameters.shufflePlayerOrder = shufflePlayerOrder
         parameters.victoryTypes = ArrayList(victoryTypes)
         parameters.startingEra = startingEra
+        parameters.showVictoryStats = showVictoryStats
         parameters.isOnlineMultiplayer = isOnlineMultiplayer
         parameters.multiplayerServerUrl = multiplayerServerUrl
         parameters.anyoneCanSpectate = anyoneCanSpectate

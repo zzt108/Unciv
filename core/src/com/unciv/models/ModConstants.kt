@@ -51,6 +51,9 @@ class ModConstants {
     var baseCityBombardRange = 2
     var cityWorkRange = 3
     var cityExpandRange = 5
+    
+    // Number of air units that can be stationed in a city
+    var cityAirUnitCapacity = 6
 
     // Modifies how much the gold value of a one-sided trade is applied to the gifts diplomatic modifier.
     // Eg: One side offers a city, resource or gold for nothing in return.
@@ -80,7 +83,7 @@ class ModConstants {
     var naturalWonderCountAddedConstant = 0.1f
 
     // MapGenerator.spreadAncientRuins: number of ruins = suitable tile count * this
-    var ancientRuinCountMultiplier = 0.02f
+    var ancientRuinCountMultiplier = 0.025f
     // MapGenerator.spawnIce: spawn Ice where T < this, with T calculated from temperatureintensity, latitude and perlin noise.
     var spawnIceBelowTemperature = -0.8f
     // MapGenerator.spawnLakesAndCoasts: Water bodies up to this tile count become Lakes
@@ -98,12 +101,17 @@ class ModConstants {
     var pantheonBase = 10
     var pantheonGrowth = 5
 
-    var workboatAutomationSearchMaxTiles = 20
+    // AI behaviour
+    var workboatAutomationSearchMaxTiles = 37
+    var minimumCityLocationTileValue = 53f
 
     // Civilization
     var minimumWarDuration = 10
     var baseTurnsUntilRevolt = 4
     var cityStateElectionTurns = 15
+
+    // Economy
+    var maxGoldTradeOffer = 10000
 
     // City State Tribute: maximum points from Force ranking towards reaching Tribute willingness threshold
     var tributeGlobalModifier = 100 // 75 in BNW

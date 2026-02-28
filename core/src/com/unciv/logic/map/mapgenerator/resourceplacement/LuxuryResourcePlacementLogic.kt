@@ -9,9 +9,10 @@ import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.ruleset.tile.TerrainType
 import com.unciv.models.ruleset.tile.TileResource
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.utils.randomWeighted
+import yairm210.purity.annotations.Readonly
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -31,8 +32,8 @@ object LuxuryResourcePlacementLogic {
                 (it.hasUnique(UniqueType.ResourceWeighting) || it.hasUnique(UniqueType.LuxuryWeightingForCityStates)) }
 
         val maxRegionsWithLuxury = when {
-            regions.size > 12 -> 3
-            regions.size > 8 -> 2
+            regions.size > 14 -> 3
+            regions.size > 10 -> 2
             else -> 1
         }
         
@@ -58,7 +59,7 @@ object LuxuryResourcePlacementLogic {
             if (candidateLuxuries.isEmpty()) continue
 
             // Pick a luxury at random. Weight is reduced if the luxury has been picked before
-            val regionConditional = StateForConditionals(region = region)
+            val regionConditional = GameContext(region = region)
             region.luxury = candidateLuxuries.randomWeighted {
                 val weightingUnique = it.getMatchingUniques(UniqueType.ResourceWeighting, regionConditional).firstOrNull()
                 val relativeWeight = if (weightingUnique == null) 1f else weightingUnique.params[0].toFloat()
@@ -69,7 +70,7 @@ object LuxuryResourcePlacementLogic {
 
 
         val cityStateLuxuries = assignCityStateLuxuries(
-            3, // was probably intended to be "if (tileData.size > 5000) 4 else 3",
+            4, // was probably intended to be "if (tileData.size > 5000) 4 else 3",
             assignableLuxuries,
             amountRegionsWithLuxury,
             fallbackWeightings
@@ -80,6 +81,7 @@ object LuxuryResourcePlacementLogic {
         return Pair(cityStateLuxuries, randomLuxuries)
     }
 
+    @Readonly
     private fun getLuxuriesForRandomPlacement(
         assignableLuxuries: List<TileResource>,
         amountRegionsWithLuxury: HashMap<String, Int>,
@@ -97,6 +99,7 @@ object LuxuryResourcePlacementLogic {
         return remainingLuxuries.drop(targetDisabledLuxuries)
     }
 
+    @Readonly
     private fun getCandidateLuxuries(
         assignableLuxuries: List<TileResource>,
         amountRegionsWithLuxury: HashMap<String, Int>,
@@ -105,7 +108,7 @@ object LuxuryResourcePlacementLogic {
         region: Region,
         ruleset: Ruleset
     ): List<TileResource> {
-        val regionConditional = StateForConditionals(region = region)
+        val regionConditional = GameContext(region = region)
 
         var candidateLuxuries = assignableLuxuries.filter {
             amountRegionsWithLuxury[it.name]!! < maxRegionsWithLuxury &&

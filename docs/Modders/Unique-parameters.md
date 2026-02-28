@@ -38,6 +38,10 @@ Allowed values:
 
 - `Human player`
 - `AI player`
+- `Friendly`
+- `Hostile`
+- `Open Borders`
+- `Known` - Civilizations that are aware of the relevant Civ. Known includes self.
 - [nationFilter](#nationfilter)
 
 ## nationFilter
@@ -46,7 +50,7 @@ Allows filtering for specific nations. Used by [ModOptions.nationsToRemove](Mod-
 
 Allowed values:
 
-- `All`
+- `All`, `all`
 - `City-States`, `City-State`
 - `Major`
 - Nation name
@@ -68,11 +72,11 @@ Allowed values:
 - `non-air` for non-air non-missile units
 - `Military`, `military units`
 - `Civilian`, `civilian units`
-- `All`
+- `All`, `all`
 - `Melee`
 - `Ranged`
 - `Nuclear Weapon`
-- `Great Person`, `Great`
+- `Great Person`
 - `Embarked`
 - Matching [technologyfilter](#technologyfilter) for the tech this unit requires - e.g. `Modern Era`
 - Any exact unique the unit has
@@ -88,11 +92,12 @@ Allowed values:
 - Any matching [baseUnitFilter](#baseunitfilter)
 - Any [civFilter](#civfilter) matching the owner
 - Any unique the unit has - also includes uniques not caught by the [baseUnitFilter](#baseunitfilter), for example promotions
-- Any promotion name
+- Any promotion name, or an exact unique a promotion has
 - `Wounded`
 - `Embarked`
 - `City-State`
 - `Barbarians`, `Barbarian`
+- `Non-City`
 - Again, any combination of the above is also allowed, e.g. `[{Wounded} {Water}]` units.
 
 You can check this in-game using the console with the `unit checkfilter <filter>` command
@@ -103,7 +108,7 @@ Allows to only activate a unique for certain buildings.
 
 Allowed values:
 
-- `All`
+- `All`, `all`
 - `Buildings`, `Building`
 - `Wonder`, `Wonders`
 - `National Wonder`, `National`
@@ -124,7 +129,7 @@ Allowed values:
 cityFilters allow us to choose the range of cities affected by this unique:
 
 - `in this city`
-- `in all cities`
+- `in all cities`, `All`, `all` - Generally applies to all cities owned by the relevant civ
 - `in your cities`, `Your`
 - `in all coastal cities`, `Coastal`
 - `in capital`, `Capital`
@@ -137,6 +142,7 @@ cityFilters allow us to choose the range of cities affected by this unique:
 - `in foreign cities`, `Foreign`
 - `in annexed cities`, `Annexed`
 - `in puppeted cities`, `Puppeted`
+- `in resisting cities`, `Resisting`
 - `in cities being razed`, `Razing`
 - `in holy cities`, `Holy`
 - `in City-State cities`
@@ -148,6 +154,18 @@ cityFilters allow us to choose the range of cities affected by this unique:
 
 You can check this in-game using the console with the `city checkfilter <filter>` command
 
+## eraFilter
+
+For filtering a specific era.
+
+Allowed values:
+
+- Era name (e.g.: `Modern era`)
+- `any era`
+- `Starting Era` - The era in which the game began
+- `pre-[era]` - Any era that appears prior to the given era (e.g.: `pre-[Modern era]`)
+- `post-[era]` - Any era that appears after the given era (e.g.: `post-[Ancient era]`)
+
 ## improvementFilter
 
 For filtering a specific improvement.
@@ -155,8 +173,10 @@ For filtering a specific improvement.
 Allowed values:
 
 - improvement name
-- `All`
-- `Great Improvements`, `Great`
+- An exact unique the improvement has (e.g.: `spaceship improvement`)
+- `Improvement`
+- `All`, `all`
+- `Great Improvement`, `Great`
 - `All Road` - for Roads & Railroads
 
 ## populationFilter
@@ -189,7 +209,7 @@ For filtering specific relgions
 
 Allowed values:
 
-- `All` or `all`
+- `All`, `all`
 - `[policyBranchName] branch`
 - The name of the policy
 - A unique the Policy has (verbatim, no placeholders)
@@ -238,7 +258,8 @@ These can be strung together with ", " between them, for example: `+2 Production
 Allowed values:
 
 - Resource name
-- `any`, `all`
+- `any`
+- `All`, `all`
 - Resource type: `Strategic`, `Luxury`, `Bonus`
 - Stat provided by the resource when improved (e.g. `Food`)
 
@@ -270,8 +291,8 @@ At the moment only implemented for [ModOptions.techsToRemove](Mod-file-structure
 
 Allowed values:
 
-- `All`
-- The name of an Era
+- `All`, `all`
+- An [eraFilter](#erafilter) matching the technology's era
 - The name of a Technology
 - A unique a Technology has (verbatim, no placeholders)
 
@@ -290,18 +311,23 @@ Allowed values:
     - Natural wonder
     - A [nationFilter](#nationfilter) matching the tile owner
 - Or the filter is a constant string choosing a derived test:
-    - `All`
+    - `All`, `all`
     - `Terrain`
     - `Water`, `Land`
     - `Coastal` (at least one direct neighbor is a coast)
     - `River` (as in all 'river on tile' contexts, it means 'adjacent to a river on at least one side')
     - `Open terrain`, `Rough terrain` (note all terrain not having the rough unique is counted as open)
-    - `Friendly Land` - land belonging to you, or other civs with open borders to you
+    - `Friendly Land`, `Friendly` - land belonging to you, or other civs with open borders to you
     - `Foreign Land` - any land that isn't friendly land
-    - `Enemy Land` - any land belonging to a civ you are at war with
+    - `Enemy Land`, `Enemy` - any land belonging to a civ you are at war with
     - `your` - land belonging to you
+    - `Unowned` - land that is not owned by any civ
     - `Water resource`, `Strategic resource`, `Luxury resource`, `Bonus resource`, `resource`
     - `Natural Wonder` (as opposed to above which means testing for a specific Natural Wonder by name, this tests for any of them)
+    - `Featureless`
+    - `Fresh Water`
+    - `non-fresh water`
+    - `Impassible`
 
 Please note all of these are _case-sensitive_.
 
@@ -315,6 +341,7 @@ Allowed values:
 
 - [terrainFilter](#terrainfilter) for this tile
 - [improvementFilter](#improvementfilter) for this tile
+- [civFilter](#civfilter) of the civilization who owns this tile
 - `Improvement` or `improved` for tiles with any improvements
 - `unimproved` for tiles with no improvement
 - `pillaged` for pillaged tiles
@@ -341,23 +368,77 @@ Allowed values:
 
 [//]: # (Countables automatically generated BEGIN)
 -   Integer constant - any positive or negative integer number
+    - Example: `Only available <when number of [123] is more than [0]>`
 -   `turns` - Number of turns played
-    (Always starts at zero irrespective of game speed or start era)
+    - Example: `Only available <when number of [turns] is more than [0]>`
+    - Always starts at zero irrespective of game speed or start era
 -   `year` - The current year
-    (Depends on game speed or start era, negative for years BC)
+    - Example: `Only available <when number of [year] is more than [0]>`
+    - Depends on game speed or start era, negative for years BC
 -   `Cities` - The number of cities the relevant Civilization owns
+    - Example: `Only available <when number of [Cities] is more than [0]>`
 -   `Units` - The number of units the relevant Civilization owns
+    - Example: `Only available <when number of [Units] is more than [0]>`
 -   Stat name (`Production`, `Food`, `Gold`, `Science`, `Culture`, `Happiness` or `Faith`)
-    gets the stat *reserve*, not the amount per turn (can be city stats or civilization stats, depending on where the unique is used)
+    - Example: `Only available <when number of [Science] is more than [0]>`
+    - Gets the stat *reserve*, not the amount per turn (can be city stats or civilization stats, depending on where the unique is used)
+-   Stat/Resource Per Turn
+    - Example: `Only available <when number of [[Culture] Per Turn] is more than [0]>`
+    - Gets the amount of a stat or resource the civilization gains per turn
 -   `Completed Policy branches`
+    - Example: `Only available <when number of [Completed Policy branches] is more than [0]>`
 -   `[cityFilter] Cities`
+    - Example: `Only available <when number of [[in all cities] Cities] is more than [0]>`
 -   `[mapUnitFilter] Units`
+    - Example: `Only available <when number of [[Wounded] Units] is more than [0]>`
+-   `Carried [mapUnitFilter] units` - The number of units being carried by this unit
+    - Example: `Only available <when number of [Carried [Air] units] is more than [0]>`
+    - Only counts transported units matching the filter. For use with 'when number of' conditionals.
 -   `[buildingFilter] Buildings`
+    - Example: `Only available <when number of [[Culture] Buildings] is more than [0]>`
+-   `[buildingFilter] Buildings by [civFilter] Civilizations`
+    - Example: `Only available <when number of [[Culture] Buildings by [City-States] Civilizations] is more than [0]>`
+-   `[cityFilter] Cities of [civFilter] Civilizations`
+    - Example: `Only available <when number of [[in all cities] Cities of [City-States] Civilizations] is more than [0]>`
+-   `Adopted [policyFilter] Policies`
+    - Example: `Only available <when number of [Adopted [Oligarchy] Policies] is more than [0]>`
+-   `Adopted [policyFilter] Policies by [civFilter] Civilizations`
+    - Example: `Only available <when number of [Adopted [Oligarchy] Policies by [City-States] Civilizations] is more than [0]>`
+-   `Researched [techFilter] Technologies`
+    - Example: `Only available <when number of [Researched [Agriculture] Technologies] is more than [0]>`
+    - Counts researched matching technologies for the relevant Civilization
+    - Repeatable technologies, like Future Tech, are only counted once
 -   `Remaining [civFilter] Civilizations`
+    - Example: `Only available <when number of [Remaining [City-States] Civilizations] is more than [0]>`
 -   `Owned [tileFilter] Tiles`
+    - Example: `Only available <when number of [Owned [Farm] Tiles] is more than [0]>`
+-   `[tileFilter] Tiles`
+    - Example: `Only available <when number of [[Desert] Tiles] is more than [0]>`
 -   Resource name - From [TileResources.json](3-Map-related-JSON-files.md#tileresourcesjson)
-    (can be city stats or civilization stats, depending on where the unique is used)
-    For example: If a unique is placed on a building, then the retrieved resources will be of the city. If placed on a policy, they will be of the civilization.
-    This can make a difference for e.g. local resources, which are counted per city.
+    - Example: `Only available <when number of [Iron] is more than [0]>`
+    - Can be city stats or civilization stats, depending on where the unique is used
+    - For example: If a unique is placed on a building, then the retrieved resources will be of the city. If placed on a policy, they will be of the civilization.
+    - This can make a difference for e.g. local resources, which are counted per city.
+-   `[resourceFilter] resource of [civFilter] Civilizations`
+    - Example: `Only available <when number of [[Strategic] resource of [City-States] Civilizations] is more than [0]>`
+-   `Era number` - Number of the era the current player is in
+    - Example: `Only available <when number of [Era number] is more than [0]>`
+    - Zero-based index of the Era in Eras.json.
+-   `Speed modifier for [stat]` - A game speed modifier for a specific Stat, as percentage
+    - Example: `Only available <when number of [Speed modifier for [Culture]] is more than [0]>`
+    - Chooses an appropriate field from the Speeds.json entry the player has chosen.
+    - It is returned multiplied by 100.
+    - Food and Happiness return the generic `modifier` field.
+    - Other fields like `goldGiftModifier` or `barbarianModifier` are not accessible with this Countable.
+-   Evaluate expressions!
+    - Example: `Only available <when number of [[Iron] + 2] is more than [0]>`
+    - Expressions support arbitrary math operations, and can include other countables, when surrounded by square brackets.
+    - For example, since `Cities` is a countable, and `[Melee] units` is a countable, you can have something like: `([[Melee] units] + 1) / [Cities]` (the whitespace is optional but helps readability)
+    - Since on translation, the brackets are removed, the expression will be displayed as `(Melee units + 1) / Cities`
+    - Supported operations between 2 values are: +, -, *, /, %, ^
+    - Supported operations on 1 value are: - (negation), √ (square root), abs (absolute value - turns negative into positive), sqrt (square root), floor (round down), ceil (round up)
+    - Supported functions:
+    -  - `max(expression,expression,...)`
+    -  - `min(expression,expression,...)`
 
 [//]: # (Countables automatically generated END)

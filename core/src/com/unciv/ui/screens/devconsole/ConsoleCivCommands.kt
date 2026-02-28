@@ -4,7 +4,7 @@ import com.unciv.logic.civilization.PlayerType
 import com.unciv.models.ruleset.Policy
 import com.unciv.models.ruleset.tech.Technology
 import com.unciv.models.ruleset.unique.Countables
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.stats.Stat
 import com.unciv.ui.screens.devconsole.CliInput.Companion.findCliInput
 
@@ -43,7 +43,7 @@ internal class ConsoleCivCommands : ConsoleCommandNode {
             val policy = console.findCliInput<Policy>(params[1]) // yes this also finds PolicyBranch instances
                 ?: throw ConsoleErrorException("Unrecognized policy")
             if (civ.policies.isAdopted(policy.name))
-                DevConsoleResponse.hint("${civ.civName} already has adopted ${policy.name}")
+                DevConsoleResponse.hint("${civ.civID} already has adopted ${policy.name}")
             else {
                 civ.policies.freePolicies++
                 civ.policies.adopt(policy)
@@ -56,7 +56,7 @@ internal class ConsoleCivCommands : ConsoleCommandNode {
             val policy = console.findCliInput<Policy>(params[1])
                 ?: throw ConsoleErrorException("Unrecognized policy")
             if (!civ.policies.isAdopted(policy.name))
-                DevConsoleResponse.hint("${civ.civName} does not have ${policy.name}")
+                DevConsoleResponse.hint("${civ.civID} does not have ${policy.name}")
             else {
                 civ.policies.removePolicy(policy, assumeWasFree = true) // See UniqueType.OneTimeRemovePolicy
                 DevConsoleResponse.OK
@@ -68,7 +68,7 @@ internal class ConsoleCivCommands : ConsoleCommandNode {
             val tech = console.findCliInput<Technology>(params[1])
                 ?: throw ConsoleErrorException("Unrecognized technology")
             if (civ.tech.isResearched(tech.name))
-                DevConsoleResponse.hint("${civ.civName} already has researched ${tech.name}")
+                DevConsoleResponse.hint("${civ.civID} already has researched ${tech.name}")
             else {
                 civ.tech.addTechnology(tech.name, false)
                 DevConsoleResponse.OK
@@ -80,7 +80,7 @@ internal class ConsoleCivCommands : ConsoleCommandNode {
             val tech = console.findCliInput<Technology>(params[1])
                 ?: throw ConsoleErrorException("Unrecognized technology")
             if (!civ.tech.isResearched(tech.name))
-                DevConsoleResponse.hint("${civ.civName} does not have ${tech.name}")
+                DevConsoleResponse.hint("${civ.civID} does not have ${tech.name}")
             else {
                 civ.tech.techsResearched.removeAll { it == tech.name } // Can have multiple for researchable techs
                 DevConsoleResponse.OK
@@ -89,7 +89,7 @@ internal class ConsoleCivCommands : ConsoleCommandNode {
 
         "checkcountable" to ConsoleAction("civ checkcountable <countable> [civName]") { console, params ->
             val civ = console.getCivByNameOrSelected(params.getOrNull(1))
-            val amount = Countables.getCountableAmount(params[0].originalUnquoted(), StateForConditionals(civ))
+            val amount = Countables.getCountableAmount(params[0].originalUnquoted(), GameContext(civ))
             DevConsoleResponse.hint(amount?.toString() ?: "Invalid countable")
         },
     )

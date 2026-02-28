@@ -11,7 +11,7 @@ import com.unciv.models.Counter
 import com.unciv.models.Religion
 import com.unciv.models.ruleset.Belief
 import com.unciv.models.ruleset.BeliefType
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.widgets.AutoScrollPane
@@ -54,7 +54,7 @@ class ReligiousBeliefsPickerScreen (
     private var rightSelection = Selection()
 
     private val currentReligion = choosingCiv.religionManager.religion
-        ?: Religion("None", gameInfo, choosingCiv.civName)
+        ?: Religion("None", gameInfo, choosingCiv)
 
     init {
         leftChosenBeliefs.defaults().right().pad(10f).fillX()
@@ -200,7 +200,7 @@ class ReligiousBeliefsPickerScreen (
         val availableBeliefs = ruleset.beliefs.values
             .filter { it.type == beliefType || beliefType == BeliefType.Any }
 
-        val civReligionManager = currentReligion.getFounder().religionManager
+        val civReligionManager = currentReligion.foundingCiv.religionManager
 
         for (belief in availableBeliefs) {
             val beliefButton = getBeliefButton(belief)
@@ -220,7 +220,7 @@ class ReligiousBeliefsPickerScreen (
                     // The Belief is not available because someone already has it
                     beliefButton.disable(redDisableColor)
                 }
-                belief.getMatchingUniques(UniqueType.OnlyAvailable, StateForConditionals.IgnoreConditionals)
+                belief.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals)
                     .any { !it.conditionalsApply(choosingCiv.state) } ->
                     // The Belief is blocked
                     beliefButton.disable(redDisableColor)

@@ -1,16 +1,17 @@
 package com.unciv.logic.automation.civilization
 
-import com.badlogic.gdx.math.Vector2
 import com.unciv.Constants
 import com.unciv.logic.GameInfo
 import com.unciv.logic.IsPartOfGameInfoSerialization
 import com.unciv.logic.civilization.NotificationCategory
 import com.unciv.logic.civilization.NotificationIcon
+import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.TileMap
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.BaseUnit
 import com.unciv.utils.randomWeighted
+import yairm210.purity.annotations.Readonly
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -69,7 +70,7 @@ class BarbarianManager : IsPartOfGameInfoSerialization {
     }
 
     /** Called when an encampment was attacked, will speed up time to next spawn */
-    fun campAttacked(position: Vector2) {
+    fun campAttacked(position: HexCoord) {
         encampments.firstOrNull { it.position == position }?.wasAttacked()
     }
 
@@ -131,10 +132,7 @@ class BarbarianManager : IsPartOfGameInfoSerialization {
             } else
                 tile = viableTiles.random()
 
-            tile.setImprovement(Constants.barbarianEncampment)
-            val newCamp = Encampment(tile.position)
-            newCamp.gameInfo = gameInfo
-            encampments.add(newCamp)
+            createNewCamp(tile)
             notifyCivsOfBarbarianEncampment(tile)
             addedCamps++
 
@@ -162,10 +160,18 @@ class BarbarianManager : IsPartOfGameInfoSerialization {
                 it.setLastSeenImprovement(tile.position, Constants.barbarianEncampment)
             }
     }
+    // Creates a new camp without any checks - Does not affect notifications
+    fun createNewCamp(tile: Tile) {
+        tile.setImprovement(Constants.barbarianEncampment)
+        val newCamp = Encampment(tile.position)
+        newCamp.gameInfo = gameInfo
+        encampments.add(newCamp)
+    }
+
 }
 
 class Encampment() : IsPartOfGameInfoSerialization {
-    val position = Vector2()
+    var position = HexCoord()
     var countdown = 0
     var spawnedUnits = -1
     var destroyed = false // destroyed encampments haunt the vicinity for 15 turns preventing new spawns
@@ -173,9 +179,8 @@ class Encampment() : IsPartOfGameInfoSerialization {
     @Transient
     lateinit var gameInfo: GameInfo
 
-    constructor(position: Vector2): this() {
-        this.position.x = position.x
-        this.position.y = position.y
+    constructor(position: HexCoord): this() {
+        this.position = position
     }
 
     fun clone(): Encampment {
@@ -241,20 +246,26 @@ class Encampment() : IsPartOfGameInfoSerialization {
 
     /** Attempts to spawn a barbarian on [position], returns true if successful and false if unsuccessful. */
     private fun spawnUnit(naval: Boolean): Boolean {
+        updateBarbarianTech()
         val unitToSpawn = chooseBarbarianUnit(naval) ?: return false // return false if we didn't find a unit
-        val spawnedUnit = gameInfo.tileMap.placeUnitNearTile(position, unitToSpawn, gameInfo.getBarbarianCivilization())
+        val spawnedUnit = gameInfo.tileMap.placeUnitNearTile(position.toHexCoord(), unitToSpawn, gameInfo.getBarbarianCivilization())
         return (spawnedUnit != null)
     }
-
-    private fun chooseBarbarianUnit(naval: Boolean): BaseUnit? {
-        // if we don't make this into a separate list then the retain() will happen on the Tech keys,
-        // which effectively removes those techs from the game and causes all sorts of problems
+    
+    private fun updateBarbarianTech(){
+        val barbarianCiv = gameInfo.getBarbarianCivilization()
         val allResearchedTechs = gameInfo.ruleset.technologies.keys.toMutableList()
         for (civ in gameInfo.civilizations.filter { !it.isBarbarian && !it.isDefeated() }) {
             allResearchedTechs.retainAll(civ.tech.techsResearched)
         }
-        val barbarianCiv = gameInfo.getBarbarianCivilization()
         barbarianCiv.tech.techsResearched = allResearchedTechs.toHashSet()
+    }
+
+    @Readonly
+    private fun chooseBarbarianUnit(naval: Boolean): BaseUnit? {
+        // if we don't make this into a separate list then the retain() will happen on the Tech keys,
+        // which effectively removes those techs from the game and causes all sorts of problems
+        val barbarianCiv = gameInfo.getBarbarianCivilization()
         val unitList = gameInfo.ruleset.units.values
             .filter { it.isMilitary &&
                     !(it.hasUnique(UniqueType.CannotAttack) ||

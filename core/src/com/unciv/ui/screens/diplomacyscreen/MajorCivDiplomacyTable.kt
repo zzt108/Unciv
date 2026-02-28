@@ -8,13 +8,11 @@ import com.unciv.UncivGame
 import com.unciv.logic.civilization.AlertType
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.PopupAlert
-import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
-import com.unciv.logic.civilization.diplomacy.DiplomacyManager
-import com.unciv.logic.civilization.diplomacy.DiplomaticModifiers
-import com.unciv.logic.civilization.diplomacy.RelationshipLevel
+import com.unciv.logic.civilization.diplomacy.*
 import com.unciv.logic.trade.TradeOffer
 import com.unciv.logic.trade.TradeOfferType
 import com.unciv.models.ruleset.unique.UniqueType
+import com.unciv.models.translations.fillPlaceholders
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.extensions.addSeparator
 import com.unciv.ui.components.extensions.disable
@@ -85,12 +83,14 @@ class MajorCivDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         if (otherCiv.getCapital() != null && viewingCiv.hasExplored(otherCiv.getCapital()!!.getCenterTile()))
             diplomacyTable.add(diplomacyScreen.getGoToOnMapButton(otherCiv)).row()
 
-        if (!otherCiv.isHuman()) { // human players make their own choices
+        if (otherCiv.isHuman())
+            diplomacyTable.add(diplomacyScreen.getHumanRelationshipTable(otherCivDiplomacyManager)).row()
+        else { 
             diplomacyTable.add(diplomacyScreen.getRelationshipTable(otherCivDiplomacyManager)).row()
             diplomacyTable.add(getDiplomacyModifiersTable(otherCivDiplomacyManager)).row()
-            val promisesTable = getPromisesTable(diplomacyManager, otherCivDiplomacyManager)
-            if (promisesTable != null) diplomacyTable.add(promisesTable).row()
         }
+        val promisesTable = getPromisesTable(diplomacyManager, otherCivDiplomacyManager)
+        if (promisesTable != null) diplomacyTable.add(promisesTable).row()
 
         // Starting playback here assumes the MajorCivDiplomacyTable is shown immediately
         UncivGame.Current.musicController.playVoice(helloVoice)
@@ -132,7 +132,14 @@ class MajorCivDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
             ConfirmPopup(diplomacyScreen, "Denounce [${otherCiv.civName}]?", "Denounce ([30] turns)") {
                 diplomacyManager.denounce()
                 diplomacyScreen.updateLeftSideTable(otherCiv)
-                diplomacyScreen.setRightSideFlavorText(otherCiv, "We will remember this.", "Very well.")
+                diplomacyScreen.setRightSideFlavorText(
+                    otherCiv,
+                    if (otherCiv.nation.denounced.isNotEmpty()) otherCiv.nation.denounced else "We will remember this.",
+                    "Very well."
+                )
+
+                val music = UncivGame.Current.musicController
+                music.playVoice("${otherCiv.nation.name}.denounced")
             }.open()
         }
         if (diplomacyScreen.isNotPlayersTurn()) denounceButton.disable()
@@ -146,13 +153,13 @@ class MajorCivDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
             otherCiv.popupAlerts.add(
                 PopupAlert(
                     AlertType.DeclarationOfFriendship,
-                    viewingCiv.civName
+                    viewingCiv.civID
                 )
             )
             declareFriendshipButton.disable()
         }
         if (diplomacyScreen.isNotPlayersTurn() || otherCiv.popupAlerts
-                .any { it.type == AlertType.DeclarationOfFriendship && it.value == viewingCiv.civName }
+                .any { it.type == AlertType.DeclarationOfFriendship && it.value == viewingCiv.civID }
         )
             declareFriendshipButton.disable()
         return declareFriendshipButton
@@ -175,28 +182,19 @@ class MajorCivDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
     ): Table? {
         val promisesTable = Table()
 
-        if (otherCivDiplomacyManager.hasFlag(DiplomacyFlags.AgreedToNotSettleNearUs)) {
-            val text =
-                "We promised not to settle near them ([${otherCivDiplomacyManager.getFlag(DiplomacyFlags.AgreedToNotSettleNearUs)}] turns remaining)"
-            promisesTable.add(text.toLabel(Color.LIGHT_GRAY)).row()
+        for (demand in Demand.entries){
+            if (otherCivDiplomacyManager.hasFlag(demand.agreedToDemand)) {
+                val turnsLeft = otherCivDiplomacyManager.getFlag(demand.agreedToDemand)
+                val text = demand.wePromisedText.fillPlaceholders(turnsLeft.toString())
+                promisesTable.add(text.toLabel(Color.LIGHT_GRAY)).row()
+            }
+            if (diplomacyManager.hasFlag(demand.agreedToDemand)) {
+                val turnsLeft = diplomacyManager.getFlag(demand.agreedToDemand)
+                val text = demand.theyPromisedText.fillPlaceholders(turnsLeft.toString())
+                promisesTable.add(text.toLabel(Color.LIGHT_GRAY)).row()
+            }
         }
-        if (diplomacyManager.hasFlag(DiplomacyFlags.AgreedToNotSettleNearUs)) {
-            val text =
-                "They promised not to settle near us ([${diplomacyManager.getFlag(DiplomacyFlags.AgreedToNotSettleNearUs)}] turns remaining)"
-            promisesTable.add(text.toLabel(Color.LIGHT_GRAY)).row()
-        }
-
-        if (otherCivDiplomacyManager.hasFlag(DiplomacyFlags.AgreedToNotSpreadReligion)) {
-            val text =
-                "We promised not to spread religion to them ([${otherCivDiplomacyManager.getFlag(DiplomacyFlags.AgreedToNotSpreadReligion)}] turns remaining)"
-            promisesTable.add(text.toLabel(Color.LIGHT_GRAY)).row()
-        }
-        if (diplomacyManager.hasFlag(DiplomacyFlags.AgreedToNotSpreadReligion)) {
-            val text =
-                "They promised not to spread religion to us ([${diplomacyManager.getFlag(DiplomacyFlags.AgreedToNotSpreadReligion)}] turns remaining)"
-            promisesTable.add(text.toLabel(Color.LIGHT_GRAY)).row()
-        }
-
+        
         return if (promisesTable.cells.isEmpty) null else promisesTable
     }
 
@@ -223,33 +221,22 @@ class MajorCivDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         val demandsTable = Table()
         demandsTable.defaults().pad(10f)
 
-        val dontSettleCitiesButton = "Please don't settle new cities near us.".toTextButton()
-        if (otherCiv.popupAlerts.any { it.type == AlertType.DemandToStopSettlingCitiesNear && it.value == viewingCiv.civName })
-            dontSettleCitiesButton.disable()
-        dontSettleCitiesButton.onClick {
-            otherCiv.popupAlerts.add(
-                PopupAlert(
-                    AlertType.DemandToStopSettlingCitiesNear,
-                    viewingCiv.civName
-                )
-            )
-            dontSettleCitiesButton.disable()
+        val diplomacyManager = viewingCiv.getDiplomacyManager(otherCiv)!!
+        
+        for (demand in Demand.entries){
+            val button = demand.demandText.toTextButton()
+            
+            if (otherCiv.popupAlerts.any { it.type == demand.demandAlert && it.value == viewingCiv.civID } // Already demanded
+                || diplomacyManager.hasFlag(demand.agreedToDemand)) { // already agreed
+                button.disable()
+            } else {
+                button.onClick {
+                    otherCiv.popupAlerts.add(PopupAlert(demand.demandAlert, viewingCiv.civID))
+                    button.disable()
+                }
+            }
+            demandsTable.add(button).row()
         }
-        demandsTable.add(dontSettleCitiesButton).row()
-
-        val dontSpreadReligionButton = "Please don't spread your religion to us.".toTextButton()
-        if (otherCiv.popupAlerts.any { it.type == AlertType.DemandToStopSpreadingReligion && it.value == viewingCiv.civName })
-            dontSpreadReligionButton.disable()
-        dontSpreadReligionButton.onClick {
-            otherCiv.popupAlerts.add(
-                PopupAlert(
-                    AlertType.DemandToStopSpreadingReligion,
-                    viewingCiv.civName
-                )
-            )
-            dontSpreadReligionButton.disable()
-        }
-        demandsTable.add(dontSpreadReligionButton).row()
 
         demandsTable.add(Constants.close.toTextButton().onClick { diplomacyScreen.updateRightSide(otherCiv) })
         return demandsTable

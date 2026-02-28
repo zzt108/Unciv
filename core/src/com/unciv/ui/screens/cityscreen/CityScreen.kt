@@ -145,6 +145,7 @@ class CityScreen(
     /** Particle effects for WLTK day decoration */
     private val isWLTKday = city.isWeLoveTheKingDayActive()
     private val fireworks: ParticleEffectMapFireworks?
+    internal var pauseFireworks = false
 
     init {
         if (isWLTKday && UncivGame.Current.settings.citySoundsVolume > 0) {
@@ -263,7 +264,7 @@ class CityScreen(
             val improvementToPlace = pickTileData!!.improvement
             return when {
                 tile.isMarkedForCreatesOneImprovement() -> Color.BROWN to 0.7f
-                !tile.improvementFunctions.canBuildImprovement(improvementToPlace, city.civ) -> Color.RED to 0.4f
+                !tile.improvementFunctions.canBuildImprovement(improvementToPlace, city.state) -> Color.RED to 0.4f
                 isExistingImprovementValuable(tile) -> Color.ORANGE to 0.5f
                 tile.improvement != null -> Color.YELLOW to 0.6f
                 tile.turnsToImprovement > 0 -> Color.YELLOW to 0.6f
@@ -272,8 +273,9 @@ class CityScreen(
         }
 
         for (tileGroup in tileGroups) {
-            tileGroup.update()
+            tileGroup.update(selectedCiv)
             tileGroup.layerMisc.removeHexOutline()
+            if (isSpying) continue // the rest is only for own cities
 
             if (tileGroup.tileState == CityTileState.BLOCKADED)
                 displayTutorial(TutorialTrigger.CityTileBlockade)
@@ -475,7 +477,9 @@ class CityScreen(
             val pickTileData = this.pickTileData!!
             this.pickTileData = null
             val improvement = pickTileData.improvement
-            if (tileInfo.improvementFunctions.canBuildImprovement(improvement, city.civ)) {
+            if (tileInfo.improvementFunctions.canBuildImprovement(improvement, city.state)
+                && !tileInfo.isMarkedForCreatesOneImprovement()) {
+                
                 if (pickTileData.isBuying) {
                     BuyButtonFactory(this).askToBuyConstruction(pickTileData.building, pickTileData.buyStat, tileInfo)
                 } else {
@@ -540,7 +544,7 @@ class CityScreen(
     fun exit() {
         val newScreen = game.popScreen()
         if (newScreen is WorldScreen) {
-            newScreen.mapHolder.setCenterPosition(city.location, immediately = true)
+            newScreen.mapHolder.setCenterPosition(city.location.toHexCoord(), immediately = true)
             newScreen.bottomUnitTable.selectUnit()
         }
     }
@@ -577,6 +581,7 @@ class CityScreen(
 
     override fun render(delta: Float) {
         super.render(delta)
+        if (pauseFireworks) return
         fireworks?.render(stage, delta)
     }
 }

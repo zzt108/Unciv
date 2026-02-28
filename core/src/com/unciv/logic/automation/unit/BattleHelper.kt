@@ -8,8 +8,9 @@ import com.unciv.logic.battle.MapUnitCombatant
 import com.unciv.logic.battle.TargetHelper
 import com.unciv.logic.city.City
 import com.unciv.logic.map.mapunit.MapUnit
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
+import yairm210.purity.annotations.Readonly
 
 object BattleHelper {
 
@@ -19,11 +20,15 @@ object BattleHelper {
         val distanceToTiles = unit.movement.getDistanceToTiles()
         val attackableEnemies = TargetHelper.getAttackableEnemies(unit, unit.movement.getDistanceToTiles(), stayOnTile=stayOnTile)
             // Only take enemies we can fight without dying or are made to die
-            .filter {unit.hasUnique(UniqueType.SelfDestructs) ||
-                BattleDamage.calculateDamageToAttacker(
+            .filter {
+                val defender = Battle.getMapCombatantOfTile(it.tileToAttack)
+                unit.hasUnique(UniqueType.SelfDestructs) || (defender != null &&
+                (BattleDamage.calculateDamageToAttacker(
                     MapUnitCombatant(unit),
-                    Battle.getMapCombatantOfTile(it.tileToAttack)!!
-                ) + unit.getDamageFromTerrain(it.tileToAttackFrom) < unit.health
+                    defender) < unit.health
+                    && unit.getDamageFromTerrain(it.tileToAttackFrom) <= 0))
+                    // For mounted units it is fine to attack from these tiles, but with current AI movement logic it is not easy to determine if our unit can meaningfully move away after attacking
+                    // Also, AI doesn't build tactical roads
             }
 
         val enemyTileToAttack = chooseAttackTarget(unit, attackableEnemies)
@@ -67,6 +72,7 @@ object BattleHelper {
     /**
      * Choses the best target in attackableEnemies, this could be a city or a unit.
      */
+    @Readonly
     private fun chooseAttackTarget(unit: MapUnit, attackableEnemies: List<AttackableTile>): AttackableTile? {
         // Get the highest valued attackableEnemy
         var highestAttackValue = 0
@@ -91,14 +97,19 @@ object BattleHelper {
      * Siege units will almost always attack cities.
      * Base value is 100(Mele) 110(Ranged) standard deviation is around 80 to 130
      */
+    @Readonly
     private fun getCityAttackValue(attacker: MapUnit, city: City): Int {
         val attackerUnit = MapUnitCombatant(attacker)
         val cityUnit = CityCombatant(city)
-        val isCityCapturable = city.health == 1
-            || attacker.baseUnit.isMelee() && city.health <= BattleDamage.calculateDamageToDefender(attackerUnit, cityUnit).coerceAtLeast(1)
-        if (isCityCapturable)
-            return if (attacker.baseUnit.isMelee()) 10000 // Capture the city immediatly!
-            else 0 // Don't attack the city anymore since we are a ranged unit
+        
+        val canCaptureCity = attacker.baseUnit.isMelee() && !attacker.hasUnique(UniqueType.CannotCaptureCities)
+        if (city.health == 1)
+            return if (canCaptureCity) 10000 // Capture the city immediately!
+            else 0 // No reason to attack, we won't make any difference
+        
+        if (canCaptureCity && city.health <= BattleDamage.calculateDamageToDefender(attackerUnit, cityUnit).coerceAtLeast(1))
+            return 10000
+            
 
         if (attacker.baseUnit.isMelee()) {
             val battleDamage = BattleDamage.calculateDamageToAttacker(attackerUnit, cityUnit)
@@ -140,6 +151,7 @@ object BattleHelper {
      * Returns a value which represents the attacker's motivation to attack a unit.
      * Base value is 100 and standard deviation is around 80 to 130
      */
+    @Readonly
     private fun getUnitAttackValue(attacker: MapUnit, attackTile: AttackableTile): Int {
         // Base attack value, there is nothing there...
         var attackValue = Int.MIN_VALUE
@@ -147,15 +159,8 @@ object BattleHelper {
         val militaryUnit = attackTile.tileToAttack.militaryUnit
         val civilianUnit = attackTile.tileToAttack.civilianUnit
         if (militaryUnit != null) {
-            attackValue = 100
-            // Associate enemy units with number of hits from this unit to kill them
-            val attacksToKill = (militaryUnit.health.toFloat() /
-                BattleDamage.calculateDamageToDefender(MapUnitCombatant(attacker), MapUnitCombatant(militaryUnit)))
-                .coerceAtLeast(1f).coerceAtMost(10f)
-            // We can kill them in this turn
-            if (attacksToKill <= 1) attackValue += 30
-            // On average, this should take around 3 turns, so -15
-            else attackValue -= (attacksToKill * 5).toInt()
+            attackValue = 200 - militaryUnit.health + // continuously prioritise lower-health units
+                BattleDamage.calculateDamageToDefender(MapUnitCombatant(attacker), MapUnitCombatant(militaryUnit))
         } else if (civilianUnit != null) {
             attackValue = 50
             // Only melee units should really attack/capture civilian units, ranged units may be able to capture by moving
@@ -163,7 +168,7 @@ object BattleHelper {
                 if (civilianUnit.isGreatPerson()) {
                     attackValue += 150
                 }
-                if (civilianUnit.hasUnique(UniqueType.FoundCity, StateForConditionals.IgnoreConditionals)) attackValue += 60
+                if (civilianUnit.hasUnique(UniqueType.FoundCity, GameContext.IgnoreConditionals)) attackValue += 60
             } else if (attacker.baseUnit.isRanged() && !civilianUnit.hasUnique(UniqueType.Uncapturable)) {
                 return 10 // Don't shoot civilians that we can capture!
             }

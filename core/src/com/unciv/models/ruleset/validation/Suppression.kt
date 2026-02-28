@@ -5,11 +5,13 @@ import com.unciv.logic.UncivShowableException
 import com.unciv.models.ruleset.ModOptions
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.unique.IHasUniques
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.Unique
 import com.unciv.models.ruleset.unique.UniqueParameterType
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.fillPlaceholders
+import yairm210.purity.annotations.Pure
+import yairm210.purity.annotations.Readonly
 
 /**
  *  All public methods dealing with how Mod authors can suppress RulesetValidator output.
@@ -49,6 +51,7 @@ object Suppression {
     private const val untypedWarningPattern = """unique "~" not found in Unciv's unique types, and is not used as a filtering unique"""
 
     /** Determine whether [parameterText] is a valid Suppression filter as implemented by [isErrorSuppressed] */
+    @Pure
     fun isValidFilter(parameterText: String) = when {
         // Cannot contain {} or <>
         '{' in parameterText || '<' in parameterText -> false
@@ -63,6 +66,7 @@ object Suppression {
         else -> true
     }
 
+    @Pure
     private fun matchesFilter(error: RulesetError, filter: String): Boolean {
         if (error.text == filter) return true
         if (!filter.endsWith('*') || !filter.startsWith('*')) return false
@@ -70,6 +74,7 @@ object Suppression {
     }
 
     /** Determine if [error] matches any suppression Unique in [ModOptions] or the [sourceObject], or any suppression modifier in [sourceUnique] */
+    @Readonly
     internal fun isErrorSuppressed(
         globalSuppressionFilters: Collection<String>,
         sourceObject: IHasUniques?,
@@ -79,6 +84,7 @@ object Suppression {
         if (error.errorSeverityToReport >= RulesetErrorSeverity.Error) return false
         if (sourceObject == null && globalSuppressionFilters.isEmpty()) return false
 
+        @Readonly
         fun getWildcardFilter(unique: Unique) = unique.params[0].let {
             if (it.startsWith('*')) it else "*$it*"
         }
@@ -86,7 +92,7 @@ object Suppression {
         var suppressions = globalSuppressionFilters.asSequence()
         // Allow suppressing from suppression uniques in the same Unique collection
         if (sourceObject != null)
-            suppressions += sourceObject.getMatchingUniques(UniqueType.SuppressWarnings, StateForConditionals.IgnoreConditionals).map { getWildcardFilter(it) }
+            suppressions += sourceObject.getMatchingUniques(UniqueType.SuppressWarnings, GameContext.IgnoreConditionals).map { getWildcardFilter(it) }
         // Allow suppressing from modifiers in the same Unique
         if (sourceUnique != null)
             suppressions += sourceUnique.getModifiers(UniqueType.SuppressWarnings).map { getWildcardFilter(it) }
@@ -101,21 +107,21 @@ object Suppression {
     fun autoSuppressAllWarnings(ruleset: Ruleset, toModOptions: ModOptions) {
         if (ruleset.folderLocation == null)
             throw UncivShowableException("autoSuppressAllWarnings needs Ruleset.folderLocation")
-        for (error in RulesetValidator(ruleset).getErrorList()) {
+        for (error in RulesetValidator.create(ruleset).getErrorList()) {
             if (error.errorSeverityToReport >= RulesetErrorSeverity.Error) continue
             toModOptions.uniques += UniqueType.SuppressWarnings.text.fillPlaceholders(error.text)
         }
         json().toJson(toModOptions, ruleset.folderLocation!!.child("jsons/ModOptions.json"))
     }
 
-    @Suppress("SameParameterValue")  // Yes we're using a constant up there, still reads clearer
+    @Pure @Suppress("SameParameterValue")  // Yes we're using a constant up there, still reads clearer
     private fun hasCommonSubstringLength(x: String, y: String, minCommonLength: Int): Boolean {
         // This is brute-force, but adapting a public "longest-common-substring" algorithm was complex and still slooow.
         // Using the knowledge that we're only interested in the common length exceeding a threshold saves time.
         // This uses the fact that Int.until will _not_ throw on upper < lower.
-        for (xIndex in 0 until x.length - minCommonLength) {
+        (0 until x.length - minCommonLength).forEach { xIndex ->
             val xSub = x.substring(xIndex)
-            for (yIndex in 0 until y.length - minCommonLength) {
+            (0 until y.length - minCommonLength).forEach { yIndex ->
                 if (xSub.commonPrefixWith(y.substring(yIndex), true).length >= minCommonLength)
                     return true
             }

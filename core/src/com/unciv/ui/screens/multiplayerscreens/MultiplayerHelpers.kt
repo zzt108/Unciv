@@ -4,7 +4,7 @@ import com.badlogic.gdx.Gdx
 import com.unciv.Constants
 import com.unciv.UncivGame
 import com.unciv.logic.multiplayer.Multiplayer
-import com.unciv.logic.multiplayer.MultiplayerGame
+import com.unciv.logic.multiplayer.MultiplayerGamePreview
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.extensions.formatShort
 import com.unciv.ui.components.extensions.toCheckBox
@@ -19,14 +19,14 @@ import java.time.Instant
 
 object MultiplayerHelpers {
 
-    fun loadMultiplayerGame(screen: BaseScreen, selectedGame: MultiplayerGame) {
+    fun loadMultiplayerGame(screen: BaseScreen, selectedGame: MultiplayerGamePreview) {
         val loadingGamePopup = Popup(screen)
         loadingGamePopup.addGoodSizedLabel("Loading latest game state...")
         loadingGamePopup.open()
 
         Concurrency.run("JoinMultiplayerGame") {
             try {
-                UncivGame.Current.onlineMultiplayer.loadGame(selectedGame)
+                UncivGame.Current.onlineMultiplayer.downloadGame(selectedGame)
             } catch (ex: Exception) {
                 val (message) = LoadGameScreen.getLoadExceptionMessage(ex)
                 launchOnGLThread {
@@ -36,20 +36,20 @@ object MultiplayerHelpers {
         }
     }
 
-    fun buildDescriptionText(multiplayerGame: MultiplayerGame): String {
+    fun buildDescriptionText(multiplayerGamePreview: MultiplayerGamePreview): String {
         val descriptionText = StringBuilder()
-        val ex = multiplayerGame.error
+        val ex = multiplayerGamePreview.error
         if (ex != null) {
             val (message) = LoadGameScreen.getLoadExceptionMessage(ex, "Error while refreshing:")
             descriptionText.appendLine(message)
         }
-        val lastUpdate = multiplayerGame.getLastUpdate()
+        val lastUpdate = multiplayerGamePreview.getLastUpdate()
         descriptionText.appendLine("Last refresh: [${Duration.between(lastUpdate, Instant.now()).formatShort()}] ago".tr())
-        val preview = multiplayerGame.preview
+        val preview = multiplayerGamePreview.preview
         if (preview?.currentPlayer != null) {
             val currentTurnStartTime = Instant.ofEpochMilli(preview.currentTurnStartTime)
             val currentPlayer = preview.getCurrentPlayerCiv()
-            val playerDescriptor = if (currentPlayer.playerId == UncivGame.Current.settings.multiplayer.userId) {
+            val playerDescriptor = if (currentPlayer.playerId == UncivGame.Current.settings.multiplayer.getUserId()) {
                 "You"
             } else {
                 val friend = UncivGame.Current.settings.multiplayer.friendList
@@ -59,9 +59,10 @@ object MultiplayerHelpers {
             val playerText = "{${preview.currentPlayer}}{ }({$playerDescriptor})"
 
             descriptionText.appendLine("Current Turn: [$playerText] since [${Duration.between(currentTurnStartTime, Instant.now()).formatShort()}] ago".tr())
+            descriptionText.appendLine("Time to play the turn: [${Duration.ofMinutes(currentPlayer.playerMinutesBeforeForceResign.toLong()).formatShort()}]")
 
             val playerCivName = preview.civilizations
-                .firstOrNull{ it.playerId == UncivGame.Current.settings.multiplayer.userId }?.civName ?: "Unknown"
+                .firstOrNull{ it.playerId == UncivGame.Current.settings.multiplayer.getUserId() }?.civName ?: "Unknown"
 
             descriptionText.appendLine("{$playerCivName}, ${preview.difficulty.tr()}, ${Fonts.turn}${preview.turns}")
             descriptionText.appendLine("{Base ruleset:} ${preview.gameParameters.baseRuleset}")

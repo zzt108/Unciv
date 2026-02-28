@@ -1,13 +1,7 @@
 package com.unciv.logic.battle
 
-import com.badlogic.gdx.math.Vector2
 import com.unciv.logic.city.City
-import com.unciv.logic.civilization.Civilization
-import com.unciv.logic.civilization.CivilopediaAction
-import com.unciv.logic.civilization.LocationAction
-import com.unciv.logic.civilization.Notification
-import com.unciv.logic.civilization.NotificationCategory
-import com.unciv.logic.civilization.NotificationIcon
+import com.unciv.logic.civilization.*
 import com.unciv.logic.civilization.diplomacy.DiplomaticModifiers
 import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
 import com.unciv.logic.map.tile.RoadStatus
@@ -15,6 +9,7 @@ import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.ui.components.extensions.toPercent
 import com.unciv.ui.screens.worldscreen.bottombar.BattleTable
+import yairm210.purity.annotations.Readonly
 import kotlin.math.ulp
 import kotlin.random.Random
 
@@ -28,13 +23,18 @@ object Nuke {
      *
      *  Both [BattleTable.simulateNuke] and [AirUnitAutomation.automateNukes] check range, so that check is omitted here.
      */
+    @Readonly
     fun mayUseNuke(nuke: MapUnitCombatant, targetTile: Tile): Boolean {
-        if (nuke.getTile() == targetTile) return false
-        // Can only nuke visible Tiles
-        if (!targetTile.isVisible(nuke.getCivInfo())) return false
+        val attackerCiv = nuke.getCivInfo()
+        val launchTile = nuke.getTile()
+        
+        if (launchTile == targetTile) return false
+        if (!targetTile.isExplored(attackerCiv)) return false
+        // Can only nuke in unit's range, visibility (line of sight) doesn't matter
+        if (launchTile.aerialDistanceTo(targetTile) > nuke.unit.getRange()) return false
 
         var canNuke = true
-        val attackerCiv = nuke.getCivInfo()
+        
         fun checkDefenderCiv(defenderCiv: Civilization?) {
             if (defenderCiv == null) return
             // Allow nuking yourself! (Civ5 source: CvUnit::isNukeVictim)
@@ -73,7 +73,7 @@ object Nuke {
 
         if (attacker.isDefeated()) return
 
-        attacker.unit.attacksSinceTurnStart.add(Vector2(targetTile.position))
+        attacker.unit.attacksSinceTurnStart.add(targetTile.position)
 
         for (tile in hitTiles) {
             // Handle complicated effects
@@ -141,7 +141,7 @@ object Nuke {
                 )
             else
                 otherCiv.addNotification(
-                    "A(n) [${attacker.getName()}] has been detonated by an unknown civilization!",
+                    "A(n) [${attacker.getName()}] has been detonated by [an unknown civilization]!",
                     nukeNotificationAction, NotificationCategory.War, NotificationIcon.War, attacker.getName()
                 )
         }
@@ -214,11 +214,11 @@ object Nuke {
 
         // Damage city and reduce its population
         val city = tile.getCity()
-        if (city != null && tile.position == city.location) {
+        if (city != null && tile.position.toHexCoord() == city.location.toHexCoord()) {
             buildingModifier = city.getAggregateModifier(UniqueType.GarrisonDamageFromNukes)
             doNukeExplosionDamageToCity(city, nukeStrength, damageModifierFromMissingResource)
             Battle.postBattleNotifications(attacker, CityCombatant(city), city.getCenterTile())
-            Battle.destroyIfDefeated(city.civ, attacker.getCivInfo(), city.location)
+            Battle.destroyIfDefeated(city.civ, attacker.getCivInfo(), city.location.toHexCoord())
         }
 
         // Damage and/or destroy units on the tile
@@ -301,6 +301,7 @@ object Nuke {
         targetedCity.population.addPopulation(-populationLoss)
     }
 
+    @Readonly
     private fun City.getAggregateModifier(uniqueType: UniqueType): Float {
         var modifier = 1f
         for (unique in getMatchingUniques(uniqueType)) {

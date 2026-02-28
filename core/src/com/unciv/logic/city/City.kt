@@ -1,6 +1,5 @@
 package com.unciv.logic.city
 
-import com.badlogic.gdx.math.Vector2
 import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.logic.IsPartOfGameInfoSerialization
@@ -12,6 +11,9 @@ import com.unciv.logic.city.managers.CityPopulationManager
 import com.unciv.logic.city.managers.CityReligionManager
 import com.unciv.logic.city.managers.SpyFleeReason
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.civilization.transients.CapitalConnectionsFinder.CapitalConnectionMedium
+import com.unciv.logic.map.HexCoord
+import com.unciv.logic.map.PathingMap
 import com.unciv.logic.map.TileMap
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.mapunit.UnitPromotions
@@ -20,7 +22,7 @@ import com.unciv.logic.map.tile.Tile
 import com.unciv.models.Counter
 import com.unciv.models.ruleset.Building
 import com.unciv.models.ruleset.tile.TileResource
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.Unique
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.BaseUnit
@@ -28,7 +30,14 @@ import com.unciv.models.stats.GameResource
 import com.unciv.models.stats.INamed
 import com.unciv.models.stats.Stat
 import com.unciv.models.stats.SubStat
+import com.unciv.utils.withoutItem
+import yairm210.purity.annotations.Cache
+import yairm210.purity.annotations.InternalState
+import yairm210.purity.annotations.LocalState
+import yairm210.purity.annotations.Readonly
+import java.util.EnumSet
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 enum class CityFlags {
@@ -51,16 +60,17 @@ class City : IsPartOfGameInfoSerialization, INamed {
     @Transient
     lateinit var tilesInRange: HashSet<Tile>
     
-    @Transient var state = StateForConditionals.EmptyState
+    @Transient var state = GameContext.EmptyState
 
     @Transient
     // This is so that military units can enter the city, even before we decide what to do with it
     var hasJustBeenConquered = false
 
-    var location: Vector2 = Vector2.Zero
+    var location = HexCoord()
     var id: String = UUID.randomUUID().toString()
     override var name: String = ""
-    var foundingCiv = ""
+    /** Serialization field for [foundingCivObject]. Is equivalent to `foundingCivObject.civName` */
+    private var foundingCiv = ""
     // This is so that cities in resistance that are recaptured aren't in resistance anymore
     var previousOwner = ""
     var turnAcquired = 0
@@ -79,13 +89,13 @@ class City : IsPartOfGameInfoSerialization, INamed {
     var resourceStockpiles = Counter<String>()
 
     /** All tiles that this city controls */
-    var tiles = HashSet<Vector2>()
+    var tiles = HashSet<HexCoord>()
 
     /** Tiles that have population assigned to them */
-    var workedTiles = HashSet<Vector2>()
+    var workedTiles = HashSet<HexCoord>()
 
     /** Tiles that the population in them won't be reassigned */
-    var lockedTiles = HashSet<Vector2>()
+    var lockedTiles = HashSet<HexCoord>()
     var manualSpecialists = false
     var isBeingRazed = false
     var attackedThisTurn = false
@@ -96,15 +106,33 @@ class City : IsPartOfGameInfoSerialization, INamed {
     var unitShouldUseSavedPromotion = HashMap<String, Boolean>()
     
     var unitToPromotions = HashMap<String, UnitPromotions>()
-    
+
+    /** Neighboring explored cities, in radius of 12 tiles */
     @delegate:Transient
     val neighboringCities: List<City> by lazy { 
         civ.gameInfo.getCities().filter { it != this && it.getCenterTile().isExplored(civ) && it.getCenterTile().aerialDistanceTo(getCenterTile()) <= 12 }.toList()
     }
 
     private var cityAIFocus: String = CityFocus.NoFocus.name
-    fun getCityFocus() = CityFocus.entries.firstOrNull { it.name == cityAIFocus } ?: CityFocus.NoFocus
+    @Readonly fun getCityFocus() = CityFocus.entries.firstOrNull { it.name == cityAIFocus } ?: CityFocus.NoFocus
     fun setCityFocus(cityFocus: CityFocus){ cityAIFocus = cityFocus.name }
+
+    /**
+     * Civ object for the original founder of this city
+     * 
+     * Setting this also sets its backing serialization string ``foundingCiv``
+     * */
+    @Transient
+    @get:Readonly
+    var foundingCivObject: Civilization? = null
+        get() {
+            if (field == null && foundingCiv.isNotEmpty()) field = civ.gameInfo.getCivilization(foundingCiv)
+            return field
+        }
+        set(value) {
+            field = value
+            foundingCiv = value?.civID ?: ""
+        }
 
 
 
@@ -121,14 +149,15 @@ class City : IsPartOfGameInfoSerialization, INamed {
 
     internal var flagsCountdown = HashMap<String, Int>()
 
-    /** Persisted connected-to-capital (by any medium) to allow "disconnected" notifications after loading */
-    // Unknown only exists to support older saves, so those do not generate spurious connected/disconnected messages.
-    // The other names are chosen so serialization is compatible with a Boolean to allow easy replacement in the future.
-    @Suppress("EnumEntryName")
-    enum class ConnectedToCapitalStatus { Unknown, `false`, `true` }
-    var connectedToCapitalStatus = ConnectedToCapitalStatus.Unknown
+    @Transient @Cache private val landAttackPathing = ConcurrentHashMap<Civilization, PathingMap>()
+    @Transient @Cache private val amphibiousAttackPathing = ConcurrentHashMap<Civilization, PathingMap>()
+    @Transient @Cache private lateinit var potentialRoadPathing: PathingMap
+    
 
-    fun hasDiplomaticMarriage(): Boolean = foundingCiv == ""
+    /** Persisted connected-to-capital (by any medium) to allow "disconnected" notifications after loading */
+    var connectedToCapitalStatus = false
+
+    @Readonly fun hasDiplomaticMarriage(): Boolean = foundingCivObject == null
 
     //region pure functions
     fun clone(): City {
@@ -163,36 +192,65 @@ class City : IsPartOfGameInfoSerialization, INamed {
         return toReturn
     }
 
-    fun canBombard() = !attackedThisTurn && !isInResistance()
-    fun getCenterTile(): Tile = centerTile
-    fun getCenterTileOrNull(): Tile? = if (::centerTile.isInitialized) centerTile else null
-    fun getTiles(): Sequence<Tile> = tiles.asSequence().map { tileMap[it] }
-    fun getWorkableTiles() = tilesInRange.asSequence().filter { it.getOwner() == civ }
-    fun isWorked(tile: Tile) = workedTiles.contains(tile.position)
+    @Readonly fun canBombard() = !attackedThisTurn && !isInResistance()
+    @Readonly fun getCenterTile(): Tile = centerTile
+    @Readonly fun getCenterTileOrNull(): Tile? = if (::centerTile.isInitialized) centerTile else null
+    @Readonly fun getTiles(): Sequence<Tile> = tiles.asSequence().map { tileMap[it] }
+    @Readonly fun getWorkableTiles() = tilesInRange.asSequence().filter { it.getOwner() == civ }
+    @Readonly fun getWorkedTiles(): Sequence<Tile> = workedTiles.asSequence().map { tileMap[it] }
+    @Readonly fun isWorked(tile: Tile) = workedTiles.contains(tile.position)
 
-    fun isCapital(): Boolean = cityConstructions.builtBuildingUniqueMap.hasUnique(UniqueType.IndicatesCapital, state)
-    fun isCoastal(): Boolean = centerTile.isCoastalTile()
+    @Readonly fun isCapital(): Boolean = cityConstructions.builtBuildingUniqueMap.hasUnique(UniqueType.IndicatesCapital, state)
+    @Readonly fun isCoastal(): Boolean = centerTile.isCoastalTile()
+    @Readonly fun isNaval(): Boolean = centerTile.isWater || isCoastal()
+    
+    @Readonly fun getBombardRange(): Int = civ.gameInfo.ruleset.modOptions.constants.baseCityBombardRange
+    @Readonly fun getWorkRange(): Int = civ.gameInfo.ruleset.modOptions.constants.cityWorkRange
+    @Readonly fun getExpandRange(): Int = civ.gameInfo.ruleset.modOptions.constants.cityExpandRange
 
-    fun getBombardRange(): Int = civ.gameInfo.ruleset.modOptions.constants.baseCityBombardRange
-    fun getWorkRange(): Int = civ.gameInfo.ruleset.modOptions.constants.cityWorkRange
-    fun getExpandRange(): Int = civ.gameInfo.ruleset.modOptions.constants.cityExpandRange
-
-    fun isConnectedToCapital(connectionTypePredicate: (Set<String>) -> Boolean = { true }): Boolean {
+    @Readonly
+    fun isConnectedToCapital() = this in civ.cache.citiesConnectedToCapitalToMediums
+    @Readonly
+    fun isConnectedToCapital(
+        @Readonly connectionTypePredicate: (EnumSet<CapitalConnectionMedium>) -> Boolean
+    ): Boolean {
         val mediumTypes = civ.cache.citiesConnectedToCapitalToMediums[this] ?: return false
         return connectionTypePredicate(mediumTypes)
     }
+    
+    @Readonly
+    fun getLandAttackPath(destination: City, maxTurns: Int = PathingMap.MAX_VALID_TURNS): List<Tile>? {
+        @LocalState val pathingCache = landAttackPathing.getOrPut(destination.civ, {PathingMap.createLandAttackPathingMap(civ, centerTile, destination.civ)})
+        return pathingCache.getShortestPath(destination.getCenterTile(), maxTurns)
 
-    fun isGarrisoned() = getGarrison() != null
+    }
+    @Readonly
+    fun getAmphibiousAttackPath(destination: City, maxTurns: Int = PathingMap.MAX_VALID_TURNS): List<Tile>? {
+        @LocalState val pathingCache = amphibiousAttackPathing.getOrPut(destination.civ, { PathingMap.createAmphibiousAttackPathingMap(civ, centerTile, destination.civ) })
+        return pathingCache.getShortestPath(destination.getCenterTile(), maxTurns)
+    }
+
+    @Readonly
+    fun getRoadPath(destination: City, maxTurns: Int = PathingMap.MAX_VALID_TURNS): List<Tile>? {
+        if (!::potentialRoadPathing.isInitialized)
+            potentialRoadPathing = PathingMap.createRoadPathingMap(civ, centerTile)
+        return if (id < destination.id) potentialRoadPathing.getShortestPath( destination.centerTile, maxTurns)
+        else destination.getRoadPath(this, maxTurns)
+    }
+
+    @Readonly fun isGarrisoned() = getGarrison() != null
+    @Readonly
     fun getGarrison(): MapUnit? =
             getCenterTile().militaryUnit?.takeIf {
                 it.civ == this.civ && it.canGarrison()
             }
 
-    fun hasFlag(flag: CityFlags) = flagsCountdown.containsKey(flag.name)
-    fun getFlag(flag: CityFlags) = flagsCountdown[flag.name]!!
+    @Readonly fun hasFlag(flag: CityFlags) = flagsCountdown.containsKey(flag.name)
+    @Readonly fun getFlag(flag: CityFlags) = flagsCountdown[flag.name]!!
 
-    fun isWeLoveTheKingDayActive() = hasFlag(CityFlags.WeLoveTheKing)
-    fun isInResistance() = hasFlag(CityFlags.Resistance)
+    @Readonly fun isWeLoveTheKingDayActive() = hasFlag(CityFlags.WeLoveTheKing)
+    @Readonly fun isInResistance() = hasFlag(CityFlags.Resistance)
+    @Readonly
     fun isBlockaded(): Boolean {
         // Coastal cities are blocked if every adjacent water tile is blocked
         if (!isCoastal()) return false
@@ -201,34 +259,59 @@ class City : IsPartOfGameInfoSerialization, INamed {
         }
     }
 
-    fun getRuleset() = civ.gameInfo.ruleset
+    @Readonly fun getRuleset() = civ.gameInfo.ruleset
 
-    fun getResourcesGeneratedByCity(civResourceModifiers: HashMap<String, Float>) = CityResources.getResourcesGeneratedByCity(this, civResourceModifiers)
-    fun getAvailableResourceAmount(resourceName: String) = CityResources.getAvailableResourceAmount(this, resourceName)
+    @Readonly fun getResourcesGeneratedByCity(resourceModifier: (TileResource) -> Float = ::getResourceModifier) = CityResources.getResourcesGeneratedByCity(this, resourceModifier)
+    @Readonly fun getAvailableResourceAmount(resourceName: String) = CityResources.getAvailableResourceAmount(this, resourceName)
+    @Readonly fun getAvailableResourceAmount(resource: TileResource) = CityResources.getAvailableResourceAmount(this, resource)
 
-    fun isGrowing() = foodForNextTurn() > 0
-    fun isStarving() = foodForNextTurn() < 0
+    /**
+     * Returns the resource production modifier as a multiplier.
+     *
+     * For example: 1.0f means no change, 2.0f results in double production.
+     *
+     * @param resource The resource for which to calculate the modifier.
+     * @return The production modifier as a multiplier.
+     */
+    @Readonly
+    fun getResourceModifier(resource: TileResource): Float {
+        var finalModifier = 1f
 
-    fun foodForNextTurn() = cityStats.currentCityStats.food.roundToInt()
+        for (unique in getMatchingUniques(UniqueType.PercentResourceProduction))
+            if (resource.matchesFilter(unique.params[1], state))
+                finalModifier += unique.params[0].toFloat() / 100f
 
-
-    fun containsBuildingUnique(uniqueType: UniqueType, state: StateForConditionals = this.state) =
-        cityConstructions.builtBuildingUniqueMap.getMatchingUniques(uniqueType, state).any()
-
-    fun getGreatPersonPercentageBonus() = GreatPersonPointsBreakdown.getGreatPersonPercentageBonus(this)
-    fun getGreatPersonPoints() = GreatPersonPointsBreakdown(this).sum()
-
-    fun gainStockpiledResource(resource: TileResource, amount: Int) {
-        if (resource.isCityWide) resourceStockpiles.add(resource.name, amount)
-        else civ.resourceStockpiles.add(resource.name, amount)
+        return finalModifier
     }
 
-    fun addStat(stat: Stat, amount: Int) {
-        when (stat) {
-            Stat.Production -> cityConstructions.addProductionPoints(amount)
-            Stat.Food -> population.foodStored += amount
-            else -> civ.addStat(stat, amount)
-        }
+    @Readonly fun isGrowing() = foodForNextTurn() > 0
+    @Readonly fun isStarving() = foodForNextTurn() < 0
+
+    @Readonly fun foodForNextTurn() = cityStats.currentCityStats.food.roundToInt()
+
+    @Readonly
+    fun containsBuildingUnique(uniqueType: UniqueType, state: GameContext = this.state) =
+        cityConstructions.builtBuildingUniqueMap.getMatchingUniques(uniqueType, state).any()
+
+    @Readonly fun getGreatPersonPercentageBonus() = GreatPersonPointsBreakdown.getGreatPersonPercentageBonus(this)
+    @Readonly fun getGreatPersonPoints() = GreatPersonPointsBreakdown(this).sum()
+
+    fun gainStockpiledResource(resource: TileResource, amount: Int) =
+        if (resource.isCityWide) resourceStockpiles.add(resource.name, amount)
+        else civ.resourceStockpiles.add(resource.name, amount)
+
+    fun addStat(stat: Stat, amount: Int) = when (stat) {
+        Stat.Production -> cityConstructions.addProductionPoints(amount)
+        Stat.Food -> population.foodStored += amount
+        else -> civ.addStat(stat, amount)
+    }
+    
+    @Readonly
+    fun getGameResource(gameResource: GameResource): Int = when (gameResource){
+        is TileResource -> getAvailableResourceAmount(gameResource)
+        is Stat -> getStatReserve(gameResource)
+        SubStat.StoredFood -> population.foodStored
+        else -> civ.getGameResource(gameResource) // assume it's a global substat - as of now only golden age points
     }
 
     fun addGameResource(stat: GameResource, amount: Int) {
@@ -243,52 +326,37 @@ class City : IsPartOfGameInfoSerialization, INamed {
             else -> civ.addGameResource(stat, amount)
         }
     }
-
-    fun getStatReserve(stat: Stat): Int {
-        return when (stat) {
-            Stat.Production -> cityConstructions.getWorkDone(cityConstructions.getCurrentConstruction().name)
-            Stat.Food -> population.foodStored
-            else -> civ.getStatReserve(stat)
-        }
+    
+    @Readonly
+    fun getStatReserve(stat: Stat): Int = when (stat) {
+        Stat.Production -> cityConstructions.getWorkDone(cityConstructions.getCurrentConstruction().name)
+        Stat.Food -> population.foodStored
+        else -> civ.getStatReserve(stat)
     }
 
-    fun getReserve(stat: GameResource): Int {
-        if (stat is TileResource) {
-            if (!stat.isStockpiled) return 0
-            if (stat.isCityWide) return resourceStockpiles[stat.name]
-            return civ.resourceStockpiles[stat.name]
-        }
-        return when (stat) {
-            Stat.Production -> cityConstructions.getWorkDone(cityConstructions.getCurrentConstruction().name)
-            Stat.Food, SubStat.StoredFood -> population.foodStored
-            else -> civ.getReserve(stat)
-        }
+    @Readonly
+    fun hasStatToBuy(stat: Stat, price: Int): Boolean = when {
+        civ.gameInfo.gameParameters.godMode -> true
+        price == 0 -> true
+        else -> getStatReserve(stat) >= price
     }
 
-    fun hasStatToBuy(stat: Stat, price: Int): Boolean {
-        return when {
-            civ.gameInfo.gameParameters.godMode -> true
-            price == 0 -> true
-            else -> getStatReserve(stat) >= price
-        }
-    }
+    @Readonly internal fun getMaxHealth() = 200 + cityConstructions.getBuiltBuildings().sumOf { it.cityHealth }
 
-    internal fun getMaxHealth() =
-        200 + cityConstructions.getBuiltBuildings().sumOf { it.cityHealth }
+    @Readonly fun getStrength() = cityConstructions.getBuiltBuildings().sumOf { it.cityStrength }.toFloat()
 
-    fun getStrength() = cityConstructions.getBuiltBuildings().sumOf { it.cityStrength }.toFloat()
-
-    // This should probably be configurable
-    @Transient
-    private val maxAirUnits = 6
     /** Gets max air units that can remain in the city untransported */
-    fun getMaxAirUnits() = maxAirUnits
+    @Readonly fun getMaxAirUnits(): Int = civ.gameInfo.ruleset.modOptions.constants.cityAirUnitCapacity +
+        getMatchingUniques(UniqueType.CarryExtraAirUnits)
+            .filter { it.params[1] == "Air" }
+            .sumOf { it.params[0].toInt() }
 
     override fun toString() = name // for debug
 
-    fun isHolyCity(): Boolean = religion.religionThisIsTheHolyCityOf != null && !religion.isBlockedHolyCity
-    fun isHolyCityOf(religionName: String?) = isHolyCity() && religion.religionThisIsTheHolyCityOf == religionName
+    @Readonly fun isHolyCity(): Boolean = religion.religionThisIsTheHolyCityOf != null && !religion.isBlockedHolyCity
+    @Readonly fun isHolyCityOf(religionName: String?) = isHolyCity() && religion.religionThisIsTheHolyCityOf == religionName
 
+    @Readonly
     fun canBeDestroyed(justCaptured: Boolean = false): Boolean {
         if (civ.gameInfo.gameParameters.noCityRazing) return false
 
@@ -309,7 +377,7 @@ class City : IsPartOfGameInfoSerialization, INamed {
         this.civ = civInfo
         tileMap = civInfo.gameInfo.tileMap
         centerTile = tileMap[location]
-        state = StateForConditionals(this)
+        state = GameContext(this)
         tilesInRange = getCenterTile().getTilesInDistance(getWorkRange()).toHashSet()
         population.city = this
         expansion.city = this
@@ -389,8 +457,8 @@ class City : IsPartOfGameInfoSerialization, INamed {
         // Must be before removing existing capital because we may be annexing a puppet which means city stats update - see #8337
         if (isCapital()) civ.moveCapitalToNextLargest(null)
 
-        civ.cities = civ.cities.toMutableList().apply { remove(this@City) }
-        
+        civ.cities = civ.cities.withoutItem(this)
+
         if (getRuleset().tileImprovements.containsKey("City ruins"))
             getCenterTile().setImprovement("City ruins")
 
@@ -412,8 +480,6 @@ class City : IsPartOfGameInfoSerialization, INamed {
             civ.updateProximity(otherCiv,
                 otherCiv.updateProximity(civ))
         }
-
-        civ.gameInfo.cityDistances.setDirty()
     }
 
     fun annexCity() = CityConquestFunctions(this).annexCity()
@@ -438,6 +504,7 @@ class City : IsPartOfGameInfoSerialization, INamed {
         getCenterTile().setRoadStatus(requiredRoad, civ)
     }
 
+    @Readonly
     fun getGoldForSellingBuilding(buildingName: String) =
         getRuleset().buildings[buildingName]!!.cost / 10
 
@@ -454,7 +521,8 @@ class City : IsPartOfGameInfoSerialization, INamed {
         population.autoAssignPopulation() // also updates city stats
         civ.cache.updateCivResources() // this building could be a resource-requiring one
     }
-
+    
+    @Readonly
     fun canPlaceNewUnit(construction: BaseUnit): Boolean {
         val tile = getCenterTile()
         return when {
@@ -465,12 +533,14 @@ class City : IsPartOfGameInfoSerialization, INamed {
     }
 
     /** Implements [UniqueParameterType.CityFilter][com.unciv.models.ruleset.unique.UniqueParameterType.CityFilter] */
+    @Readonly
     fun matchesFilter(filter: String, viewingCiv: Civilization? = civ, multiFilter: Boolean = true): Boolean {
         return if (multiFilter)
             MultiFilter.multiFilter(filter, { matchesSingleFilter(it, viewingCiv) })
         else matchesSingleFilter(filter, viewingCiv)
     }
 
+    @Readonly
     private fun matchesSingleFilter(filter: String, viewingCiv: Civilization? = civ): Boolean {
         return when (filter) {
             "in this city" -> true // Filtered by the way uniques are found
@@ -495,7 +565,7 @@ class City : IsPartOfGameInfoSerialization, INamed {
                 && !civ.isAtWarWith(viewingCiv)
             "in enemy cities", "Enemy" -> civ.isAtWarWith(viewingCiv ?: civ)
             "in foreign cities", "Foreign" -> viewingCiv != null && viewingCiv != civ
-            "in annexed cities", "Annexed" -> foundingCiv != civ.civName && !isPuppet
+            "in annexed cities", "Annexed" -> foundingCivObject != civ && !isPuppet
             "in puppeted cities", "Puppeted" -> isPuppet
             "in resisting cities", "Resisting" -> isInResistance()
             "in cities being razed", "Razing" -> isBeingRazed
@@ -519,37 +589,76 @@ class City : IsPartOfGameInfoSerialization, INamed {
     // Sadly, due to the large disparity between use cases, there needed to be lots of functions.
 
     // Finds matching uniques provided from both local and non-local sources.
+    @Readonly
     fun getMatchingUniques(
         uniqueType: UniqueType,
-        stateForConditionals: StateForConditionals = state,
+        gameContext: GameContext = state,
         includeCivUniques: Boolean = true
     ): Sequence<Unique> {
         return if (includeCivUniques)
-            civ.getMatchingUniques(uniqueType, stateForConditionals) +
-                getLocalMatchingUniques(uniqueType, stateForConditionals)
+            civ.getMatchingUniques(uniqueType, gameContext) +
+                getLocalMatchingUniques(uniqueType, gameContext)
         else (
             cityConstructions.builtBuildingUniqueMap.getUniques(uniqueType)
                 + religion.getUniques(uniqueType)
             ).filter {
-                !it.isTimedTriggerable && it.conditionalsApply(stateForConditionals)
-            }.flatMap { it.getMultiplied(stateForConditionals) }
+                !it.isTimedTriggerable && it.conditionalsApply(gameContext)
+            }.flatMap { it.getMultiplied(gameContext) }
     }
 
     // Uniques special to this city
-    fun getLocalMatchingUniques(uniqueType: UniqueType, stateForConditionals: StateForConditionals = state): Sequence<Unique> {
+    @Readonly
+    fun getLocalMatchingUniques(uniqueType: UniqueType, gameContext: GameContext = state): Sequence<Unique> {
         val uniques = cityConstructions.builtBuildingUniqueMap.getUniques(uniqueType).filter { it.isLocalEffect } +
             religion.getUniques(uniqueType)
-        return uniques.filter { !it.isTimedTriggerable && it.conditionalsApply(stateForConditionals) }
-                .flatMap { it.getMultiplied(stateForConditionals) }
+        return uniques.filter { !it.isTimedTriggerable && it.conditionalsApply(gameContext) }
+                .flatMap { it.getMultiplied(gameContext) }
     }
 
     // Uniques coming from this city, but that should be provided globally
-    fun getMatchingUniquesWithNonLocalEffects(uniqueType: UniqueType, stateForConditionals: StateForConditionals = state): Sequence<Unique> {
+    @Readonly
+    fun getMatchingUniquesWithNonLocalEffects(uniqueType: UniqueType, gameContext: GameContext = state): Sequence<Unique> {
         val uniques = cityConstructions.builtBuildingUniqueMap.getUniques(uniqueType)
         // Memory performance showed that this function was very memory intensive, thus we only create the filter if needed
         return if (uniques.any()) uniques.filter { !it.isLocalEffect && !it.isTimedTriggerable
-            && it.conditionalsApply(stateForConditionals) }.flatMap { it.getMultiplied(stateForConditionals) }
+            && it.conditionalsApply(gameContext) }.flatMap { it.getMultiplied(gameContext) }
         else uniques
+    }
+    
+    fun clearCaches() {
+        landAttackPathing.clear()
+        amphibiousAttackPathing.clear()
+        if (::potentialRoadPathing.isInitialized)
+            potentialRoadPathing.clear()
+    }
+
+    @Readonly
+    fun getTriggeredUniques(
+        trigger: UniqueType,
+        gameContext: GameContext = state,
+        triggerFilter: (Unique) -> Boolean = { true },
+        includeCivUniques: Boolean = true): Sequence<Unique> {
+        if (includeCivUniques) {
+            return civ.getTriggeredUniques(trigger, gameContext, triggerFilter).asSequence() +
+                getLocalTriggeredUniques(trigger, gameContext, triggerFilter)
+        }
+        else {
+            val uniques =
+                cityConstructions.builtBuildingUniqueMap.getAllUniques() + religion.getAllUniques()
+            return uniques.filter {
+                it.getModifiers(trigger).any(triggerFilter) && it.conditionalsApply(gameContext)
+            }.flatMap { it.getMultiplied(gameContext) }
+        }
+    }
+
+    @Readonly
+    fun getLocalTriggeredUniques(trigger: UniqueType, gameContext: GameContext = state,
+        triggerFilter: (Unique) -> Boolean = { true }): Sequence<Unique> {
+        val uniques =
+            cityConstructions.builtBuildingUniqueMap.getAllUniques().filter { it.isLocalEffect } + religion.getAllUniques()
+        return uniques.filter {
+            it.getModifiers(trigger).any(triggerFilter) && it.conditionalsApply(gameContext)
+        }.flatMap { it.getMultiplied(gameContext) }
     }
 
     //endregion

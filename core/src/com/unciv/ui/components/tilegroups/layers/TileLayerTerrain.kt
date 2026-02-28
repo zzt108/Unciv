@@ -12,6 +12,7 @@ import com.unciv.models.ruleset.unique.LocalUniqueCache
 import com.unciv.ui.components.tilegroups.TileGroup
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.screens.basescreen.BaseScreen
+import yairm210.purity.annotations.Readonly
 import kotlin.random.Random
 
 class TileLayerTerrain(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup, size) {
@@ -64,7 +65,7 @@ class TileLayerTerrain(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup,
         val shouldShowImprovement = shownImprovement != null && UncivGame.Current.settings.showPixelImprovements
 
         val shouldShowResource = UncivGame.Current.settings.showPixelImprovements && tile.resource != null &&
-                (isForceVisible || viewingCiv == null || tile.hasViewableResource(viewingCiv))
+                (isForceVisible || viewingCiv == null || viewingCiv.canSeeResource(tile.tileResource))
 
         val resourceAndImprovementSequence = sequence {
             if (shouldShowResource)  yield(tile.resource!!)
@@ -130,6 +131,7 @@ class TileLayerTerrain(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup,
         val possibleEdgeImages = strings.edgeImagesByPosition[neighborEdgeData.direction] ?: return emptySequence()
         
         // Required for performance - full matchesFilter is too expensive for something that needs to run every update()
+        @Readonly
         fun matchesFilterMinimal(originTile: Tile, filter: String): Boolean {
             if (originTile.cachedTerrainData.terrainNameSet.contains(filter)) return true
             if (originTile.getBaseTerrain().type.name == filter) return true

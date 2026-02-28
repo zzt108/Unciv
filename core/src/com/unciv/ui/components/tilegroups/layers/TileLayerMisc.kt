@@ -10,17 +10,11 @@ import com.unciv.UncivGame
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.HexMath
 import com.unciv.logic.map.tile.Tile
+import com.unciv.logic.map.toHexCoord
 import com.unciv.models.ruleset.unique.LocalUniqueCache
 import com.unciv.models.translations.tr
-import com.unciv.ui.components.MapArrowType
-import com.unciv.ui.components.MiscArrowTypes
-import com.unciv.ui.components.TintedMapArrow
-import com.unciv.ui.components.UnitMovementMemoryType
-import com.unciv.ui.components.extensions.brighten
-import com.unciv.ui.components.extensions.center
-import com.unciv.ui.components.extensions.centerX
-import com.unciv.ui.components.extensions.toLabel
-import com.unciv.ui.components.extensions.toPrettyString
+import com.unciv.ui.components.*
+import com.unciv.ui.components.extensions.*
 import com.unciv.ui.components.tilegroups.CityTileGroup
 import com.unciv.ui.components.tilegroups.TileGroup
 import com.unciv.ui.components.tilegroups.TileSetStrings
@@ -110,13 +104,14 @@ class TileLayerResource(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup
     private var resourceName: String? = null
     private var resourceAmount: Int = -1
     private var resourceIcon: Actor? = null
+    private var resourceProvidedIcon: Actor? = null
 
     private fun updateResourceIcon(viewingCiv: Civilization?, show: Boolean) {
         // This could change on any turn, since resources need certain techs to reveal them
         val effectiveVisible = when {
             tileGroup.isForceVisible -> show
             show && viewingCiv == null -> true
-            show && tile.hasViewableResource(viewingCiv!!) -> true
+            show && viewingCiv?.canSeeResource(tile.tileResource) == true -> true
             else -> false
         }
 
@@ -144,6 +139,39 @@ class TileLayerResource(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup
         if (resourceIcon!=null){
             val isViewable = viewingCiv == null || isViewable(viewingCiv)
             dimResource(!isViewable)
+            
+            val shouldResourceProvidedBeDisplayed =
+                viewingCiv != null && tile.getOwner() == viewingCiv
+                        && tile.providesResources(viewingCiv)
+            if (shouldResourceProvidedBeDisplayed && resourceProvidedIcon == null){
+                val group = NonTransformGroup()
+                group.setSize(12f,12f)
+
+                val blackStar = ImageGetter.getImage("OtherIcons/Star")
+                blackStar.setSize(12f)
+                blackStar.color = Color.BLACK
+                blackStar.center(group)
+                group.addActor(blackStar)
+                
+                val goldStar = ImageGetter.getImage("OtherIcons/Star")
+                goldStar.setSize(10f)
+                goldStar.color = Color.GOLD
+                goldStar.center(group)
+                group.addActor(goldStar)
+                
+                // Slightly extruding out from the resource icon
+                group.setPosition(resourceIcon!!.right + 3f, resourceIcon!!.top + 3f, Align.topRight)
+                addActor(group)
+                
+                resourceProvidedIcon = group
+            }
+            
+            if (!shouldResourceProvidedBeDisplayed && resourceProvidedIcon != null){
+                resourceProvidedIcon?.remove()
+                resourceProvidedIcon = null
+            }
+            resourceProvidedIcon?.toFront()
+            resourceProvidedIcon?.isVisible = effectiveVisible
         }
     }
 
@@ -256,11 +284,11 @@ class TileLayerMisc(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup, si
 
         for (arrowToAdd in arrowsToDraw) {
             val targetTile = arrowToAdd.targetTile
-            var targetPos = Vector2(targetTile.position)
+            var targetPos = Vector2(targetTile.position.toVector2())
             if (tile.tileMap.mapParameters.worldWrap)
-                targetPos = HexMath.getUnwrappedNearestTo(targetPos,
+                targetPos = HexMath.getUnwrappedNearestTo(targetPos.toHexCoord(),
                     tile.position, tile.tileMap.maxLongitude)
-            val targetRelative = HexMath.hex2WorldCoords(targetPos)
+            val targetRelative = HexMath.hex2WorldCoords(targetPos.toHexCoord())
                 .sub(HexMath.hex2WorldCoords(tile.position))
 
             val targetDistance = sqrt(targetRelative.x.pow(2) + targetRelative.y.pow(2))
@@ -300,7 +328,7 @@ class TileLayerMisc(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup, si
             return
 
         if (DebugUtils.SHOW_TILE_COORDS) {
-            val label = this.tile.position.toPrettyString()
+            val label = this.tile.position.toVector2().toPrettyString()
             startingLocationIcons.add(label.toLabel(ImageGetter.CHARCOAL.cpy().apply { a = 0.7f }, 14).apply {
                 tileGroup.layerMisc.addActor(this)
                 setOrigin(Align.center)

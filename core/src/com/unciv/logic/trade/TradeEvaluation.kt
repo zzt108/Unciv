@@ -7,13 +7,14 @@ import com.unciv.logic.automation.civilization.DeclareWarPlanEvaluator
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
+import com.unciv.logic.civilization.diplomacy.DiplomaticModifiers
 import com.unciv.logic.civilization.diplomacy.RelationshipLevel
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.Ruleset
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
-import com.unciv.ui.components.extensions.toPercent
 import com.unciv.ui.screens.victoryscreen.RankingType
+import yairm210.purity.annotations.Readonly
 import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.math.pow
@@ -21,16 +22,34 @@ import kotlin.math.sqrt
 
 class TradeEvaluation {
 
+    @Readonly
     fun isTradeValid(trade: Trade, offerer: Civilization, tradePartner: Civilization): Boolean {
 
         // Edge case time! Guess what happens if you offer a peace agreement to the AI for all their cities except for the capital,
-        //  and then capture their capital THAT SAME TURN? It can agree, leading to the civilization getting instantly destroyed!
-        // If a civ doen't has ever owned an original capital, which means it has not settle the first city yet, 
+        // and then capture their capital THAT SAME TURN? It can agree, leading to the civilization getting instantly destroyed!
+        // If a civ has never owned an original capital, which means it has not settled the first city yet, 
         // it shouldn't be forbidden to trade with other civs owing to cities.size == 0.
         if ((offerer.hasEverOwnedOriginalCapital && trade.ourOffers.count { it.type == TradeOfferType.City } == offerer.cities.size)
             || (tradePartner.hasEverOwnedOriginalCapital && trade.theirOffers.count { it.type == TradeOfferType.City } == tradePartner.cities.size)) {
             return false
         }
+        
+        // No way to tell who offers what in isOfferValid()
+        val embassyOffer = TradeOffer(Constants.acceptEmbassy, TradeOfferType.Embassy, speed = offerer.gameInfo.speed)
+        val theirDiploManager = tradePartner.getDiplomacyManager(offerer)!!
+        val ourDiploManager = offerer.getDiplomacyManager(tradePartner)!!
+
+        if (trade.ourOffers.contains(embassyOffer)
+            && (offerer.getCapital() == null
+            || theirDiploManager.hasModifier(DiplomaticModifiers.EstablishedEmbassy)
+            || theirDiploManager.hasModifier(DiplomaticModifiers.SharedEmbassies)))
+            return false
+
+        if (trade.theirOffers.contains(embassyOffer)
+            && (tradePartner.getCapital() == null
+            || ourDiploManager.hasModifier(DiplomaticModifiers.EstablishedEmbassy)
+            || ourDiploManager.hasModifier(DiplomaticModifiers.SharedEmbassies)))
+            return false
 
         for (offer in trade.ourOffers)
             if (!isOfferValid(offer, offerer, tradePartner)) {
@@ -44,14 +63,17 @@ class TradeEvaluation {
         return true
     }
 
+    @Readonly
     private fun isOfferValid(tradeOffer: TradeOffer, offerer: Civilization, tradePartner: Civilization): Boolean {
 
+        @Readonly
         fun hasResource(tradeOffer: TradeOffer): Boolean {
             val resourcesByName = offerer.getCivResourcesByName()
             return resourcesByName.containsKey(tradeOffer.name) && resourcesByName[tradeOffer.name]!! >= tradeOffer.amount
         }
 
         return when (tradeOffer.type) {
+            TradeOfferType.Embassy -> true // Already checked
             // if they go a little negative it's okay, but don't allowing going overboard (promising same gold to many)
             TradeOfferType.Gold -> tradeOffer.amount * 0.9f < offerer.gold
             TradeOfferType.Gold_Per_Turn -> tradeOffer.amount * 0.9f < offerer.stats.statsForNextTurn.gold
@@ -72,14 +94,17 @@ class TradeEvaluation {
             TradeOfferType.Technology -> true
             TradeOfferType.Introduction -> !tradePartner.knows(tradeOffer.name) // You can't introduce them to someone they already know!
             TradeOfferType.WarDeclaration -> offerer.getDiplomacyManager(tradeOffer.name)!!.canDeclareWar()
+            TradeOfferType.PeaceProposal -> offerer.isAtWarWith(offerer.gameInfo.getCivilization(tradeOffer.name))
             TradeOfferType.City -> offerer.cities.any { it.id == tradeOffer.name }
         }
     }
 
+    @Readonly
     fun isTradeAcceptable(trade: Trade, evaluator: Civilization, tradePartner: Civilization): Boolean {
         return getTradeAcceptability(trade, evaluator, tradePartner, true) >= 0
     }
 
+    @Readonly
     fun getTradeAcceptability(trade: Trade, evaluator: Civilization, tradePartner: Civilization, includeDiplomaticGifts:Boolean = false): Int {
         val citiesAskedToSurrender = trade.ourOffers.count { it.type == TradeOfferType.City }
         val maxCitiesToSurrender = ceil(evaluator.cities.size.toFloat() / 5).toInt()
@@ -111,6 +136,7 @@ class TradeEvaluation {
         return sumOfTheirOffers - sumOfOurOffers + diplomaticGifts
     }
 
+    @Readonly
     fun evaluateBuyCostWithInflation(offer: TradeOffer, civInfo: Civilization, tradePartner: Civilization, trade: Trade): Int {
         if (offer.type != TradeOfferType.Gold && offer.type != TradeOfferType.Gold_Per_Turn)
             return (evaluateBuyCost(offer, civInfo, tradePartner, trade) / getGoldInflation(civInfo)).toInt()
@@ -120,13 +146,16 @@ class TradeEvaluation {
     /**
      * How much their offer is worth to us in gold
      */
+    @Readonly
     private fun evaluateBuyCost(offer: TradeOffer, civInfo: Civilization, tradePartner: Civilization, trade: Trade): Int {
         when (offer.type) {
+            TradeOfferType.Embassy -> return (30 * civInfo.gameInfo.speed.goldCostModifier).toInt()
             TradeOfferType.Gold -> return offer.amount
             // GPT loses value for each 'future' turn, meaning: gold now is more valuable than gold in the future
-            // Empire-wide production tends to grow at roughly 2% per turn (quick speed), so let's take that as a base line
-            // Formula could be more sophisticated by taking into account game speed and estimated chance of the gpt-giver cancelling the trade after X amount of turns
-            TradeOfferType.Gold_Per_Turn -> return (1..offer.duration).sumOf { offer.amount * 0.98.pow(it) }.toInt()
+            // Empire-wide production tends to grow at roughly 2% per turn (quick speed), so let's take that as a base line,
+            // which results in an efficiency of (0.98 + 0.98^2 + ... + 0.98^25) / 25 = 0.7772 compared to instant gold, assume this scales similarly on different game speed
+            // Formula could be more sophisticated by taking into account estimated chance of the gpt-giver cancelling the trade after X amount of turns
+            TradeOfferType.Gold_Per_Turn -> return offer.amount * offer.duration * 4/5
             TradeOfferType.Treaty -> {
                 return when (offer.name) {
                     // Since it will be evaluated twice, once when they evaluate our offer and once when they evaluate theirs
@@ -142,7 +171,7 @@ class TradeEvaluation {
                     return 0 // We don't trust you for resources
                 
                 val lowestExplicitBuyCost = civInfo.gameInfo.ruleset.tileResources[offer.name]!!
-                    .getMatchingUniques(UniqueType.AiWillBuyAt, StateForConditionals(civInfo))
+                    .getMatchingUniques(UniqueType.AiWillBuyAt, GameContext(civInfo))
                     .minOfOrNull { it.params[0].toInt() }
 
                 if (lowestExplicitBuyCost != null) return lowestExplicitBuyCost
@@ -167,7 +196,7 @@ class TradeEvaluation {
 
 
                 val lowestExplicitBuyCost = civInfo.gameInfo.ruleset.tileResources[offer.name]!!
-                    .getMatchingUniques(UniqueType.AiWillBuyAt, StateForConditionals(civInfo))
+                    .getMatchingUniques(UniqueType.AiWillBuyAt, GameContext(civInfo))
                     .minOfOrNull { it.params[0].toInt() }
                 if (lowestExplicitBuyCost != null) return lowestExplicitBuyCost
 
@@ -184,7 +213,7 @@ class TradeEvaluation {
             
             TradeOfferType.Stockpiled_Resource -> {
                 val resource = civInfo.gameInfo.ruleset.tileResources[offer.name] ?: return 0
-                val lowestBuyCost = resource.getMatchingUniques(UniqueType.AiWillBuyAt, StateForConditionals(civInfo))
+                val lowestBuyCost = resource.getMatchingUniques(UniqueType.AiWillBuyAt, GameContext(civInfo))
                     .minOfOrNull { it.params[0].toInt() }
                 return lowestBuyCost ?: 0
             }
@@ -207,6 +236,25 @@ class TradeEvaluation {
                     return 0
                 }
             }
+            TradeOfferType.PeaceProposal -> {
+                val thirdCiv = civInfo.gameInfo.getCivilization(offer.name)
+                
+                // We're buying peace if it's city state that is our ally
+                if (thirdCiv.isCityState) {
+                    val allyCiv = thirdCiv.allyCiv
+                    if (allyCiv != null && allyCiv == civInfo) {
+                        // TODO: More sophisticated formula needed, a reverse of [CityStateFunctions.influenceGainedByGift]
+                        val surplusInfluence = (thirdCiv.getDiplomacyManager(civInfo)!!.getInfluence() - 60).coerceAtLeast(0f)
+                        return (surplusInfluence * 15).toInt()
+                    }
+                }
+
+                // If we don't like third civ why should we pay
+                return if (civInfo.getDiplomacyManager(thirdCiv)!!.isRelationshipLevelLT(RelationshipLevel.Neutral)) {
+                    Int.MIN_VALUE // Maximum negative for deal to be rejected
+                }
+                else 0 // Accepts peace proposal with no value
+            }
             TradeOfferType.City -> {
                 val city = tradePartner.cities.firstOrNull { it.id == offer.name }
                     ?: throw Exception("Got an offer for city id "+offer.name+" which does't seem to exist for this civ!")
@@ -215,7 +263,7 @@ class TradeEvaluation {
                     return 0 // we can't really afford to go into negative happiness because of buying a city
                 val sumOfPop = city.population.population
                 val sumOfBuildings = city.cityConstructions.getBuiltBuildings().count()
-                return (sumOfPop * 4 + sumOfBuildings * 1 + 4 + surrounded) * 100
+                return (sumOfPop * 4 + sumOfBuildings + 4 + surrounded) * 100
             }
             TradeOfferType.Agreement -> {
                 if (offer.name == Constants.openBorders) return 100
@@ -224,17 +272,60 @@ class TradeEvaluation {
         }
     }
 
-    private fun surroundedByOurCities(city: City, civInfo: Civilization): Int {
-        val borderingCivs: Set<String> = getNeighbouringCivs(city)
-        if (borderingCivs.size == 1 && borderingCivs.contains(civInfo.civName)) {
-            return 10 // if the city is surrounded only by trading civ
+    /**
+     * Determine if peace proposal button in trade window should be enabled or disabled
+     * Note that enabled peace proposal can still result in denied trade,
+     * e.g. if no counter offer that is worth it can be made
+     * 
+     * Certain peace proposal buttons in trade window are disabled when:
+     * 1. Third civ is stronger, need to trade with them instead
+     * 2. Third civ is city state allied to civ we or trade partner is at war with
+     * 3. Third civ is human player, we don't know if they would agree to peace
+     * 4. War count down hasn't expired yet, countdown depends on game speed
+     * 
+     * @param thirdCiv Civilization for which peace proposal can be traded (mediated)
+     * @param civInfo Civilization at war with thirdCiv which trades peace proposal
+     */
+    @Readonly @Suppress("purity") // Changing trade offer nested items
+    fun isPeaceProposalEnabled(thirdCiv: Civilization, civInfo: Civilization): Boolean {
+        val diploManager = civInfo.getDiplomacyManager(thirdCiv)!!
+
+        // On standard speed 10 turns must pass before peace can be proposed
+        if (diploManager.getFlag(DiplomacyFlags.DeclaredWar) > 0) return false
+
+        // TODO: We don't know if other human player would agree to peace
+        if (thirdCiv.isHuman()) return false
+
+        if (thirdCiv.isCityState) {
+            val allyCiv = thirdCiv.allyCiv
+            if (allyCiv != null && civInfo.isAtWarWith(allyCiv)) {
+                // City state is allied to civ with whom trade partner is at war with,
+                // need to trade peace with that civ instead
+                return false
+            }
         }
-        if (borderingCivs.contains(civInfo.civName))
-            return 2 // if the city has a border with trading civ
+
+        val trade = Trade()
+        val peaceOffer = TradeOffer(Constants.peaceTreaty, TradeOfferType.Treaty, duration = civInfo.gameInfo.speed.peaceDealDuration)
+        trade.ourOffers.add(peaceOffer)
+        trade.theirOffers.add(peaceOffer)
+
+        // If trade is acceptable to thirdCiv it's either loosing the war (result > 0) or it's equal to trade partner (result == 0),
+        // so opinion of thirdCiv doesn't matter because it would agree to peace due to logic in evaluatePeaceCostForThem()
+        // Otherwise we need to trade peace with thirdCiv, instead of trade partner who is loosing the war and would always agree to peace
+        return TradeEvaluation().isTradeAcceptable(trade, thirdCiv, civInfo)
+    }
+
+    @Readonly
+    private fun surroundedByOurCities(city: City, civInfo: Civilization): Int {
+        val borderingCivs: Set<Civilization> = getNeighbouringCivs(city)
+        if (borderingCivs.contains(civInfo))
+            return 3 // if the city has a border with trading civ
         return 0
     }
 
-    private fun getNeighbouringCivs(city: City): Set<String> {
+    @Readonly
+    private fun getNeighbouringCivs(city: City): Set<Civilization> {
         val tilesList: HashSet<Tile> = city.getTiles().toHashSet()
         val cityPositionList: ArrayList<Tile> = arrayListOf()
 
@@ -245,21 +336,33 @@ class TradeEvaluation {
 
         return cityPositionList
             .asSequence()
-            .mapNotNull { it.getOwner()?.civName }
+            .mapNotNull { it.getOwner() }
             .toSet()
     }
 
 
+    @Readonly
     fun evaluateSellCostWithInflation(offer: TradeOffer, civInfo: Civilization, tradePartner: Civilization, trade: Trade): Int {
         if (offer.type != TradeOfferType.Gold && offer.type != TradeOfferType.Gold_Per_Turn)
             return (evaluateSellCost(offer, civInfo, tradePartner, trade) / getGoldInflation(civInfo)).toInt()
         return evaluateSellCost(offer, civInfo, tradePartner, trade)
     }
 
+    /**
+     * How much our offer is worth to us in gold
+     */
+    @Readonly
     private fun evaluateSellCost(offer: TradeOffer, civInfo: Civilization, tradePartner: Civilization, trade: Trade): Int {
         when (offer.type) {
+            TradeOfferType.Embassy -> {
+                val tradePartnerDiplo = civInfo.getDiplomacyManager(tradePartner)!!
+                if (tradePartnerDiplo.isRelationshipLevelLE(RelationshipLevel.Enemy)) return Int.MIN_VALUE
+                else if (tradePartnerDiplo.isRelationshipLevelLE(RelationshipLevel.Competitor))
+                    return (60 * civInfo.gameInfo.speed.goldCostModifier).toInt()
+                return (30 * civInfo.gameInfo.speed.goldCostModifier).toInt() // 30 is Civ V default (on standard only?)
+            }
             TradeOfferType.Gold -> return offer.amount
-            TradeOfferType.Gold_Per_Turn -> return offer.amount * offer.duration
+            TradeOfferType.Gold_Per_Turn -> return offer.amount * offer.duration * 4/5
             TradeOfferType.Treaty -> {
                 return when (offer.name) {
                     // Since it will be evaluated twice, once when they evaluate our offer and once when they evaluate theirs
@@ -273,7 +376,7 @@ class TradeEvaluation {
             }
             TradeOfferType.Luxury_Resource -> {
                 val lowestExplicitSellCost = civInfo.gameInfo.ruleset.tileResources[offer.name]!!
-                    .getMatchingUniques(UniqueType.AiWillSellAt, StateForConditionals(civInfo))
+                    .getMatchingUniques(UniqueType.AiWillSellAt, GameContext(civInfo))
                     .minOfOrNull { it.params[0].toInt() }
 
                 if (lowestExplicitSellCost != null) return lowestExplicitSellCost
@@ -282,7 +385,7 @@ class TradeEvaluation {
                     civInfo.getResourceAmount(offer.name) > 1 -> 250 // fair price
                     civInfo.hasUnique(UniqueType.RetainHappinessFromLuxury) -> // If we retain 100% happiness, value it as a duplicate lux
                         600 - (civInfo.getMatchingUniques(UniqueType.RetainHappinessFromLuxury)
-                            .first().params[0].toPercent() * 350).toInt()
+                            .first().params[0].toFloat() * 3.5f).toInt()
                     else -> 600 // you want to take away our last lux of this type?!
                 }
             }
@@ -294,7 +397,7 @@ class TradeEvaluation {
                     return Int.MAX_VALUE // We'd rather win the game, thanks
                 
                 val lowestExplicitSellCost = civInfo.gameInfo.ruleset.tileResources[offer.name]!!
-                    .getMatchingUniques(UniqueType.AiWillSellAt, StateForConditionals(civInfo))
+                    .getMatchingUniques(UniqueType.AiWillSellAt, GameContext(civInfo))
                     .minOfOrNull { it.params[0].toInt() }
                 
                 if (lowestExplicitSellCost != null) return lowestExplicitSellCost
@@ -323,14 +426,12 @@ class TradeEvaluation {
                 }
                 return totalCost
             }
-
             TradeOfferType.Stockpiled_Resource -> {
                 val resource = civInfo.gameInfo.ruleset.tileResources[offer.name] ?: return 0
-                val lowestSellCost = resource.getMatchingUniques(UniqueType.AiWillSellAt, StateForConditionals(civInfo))
+                val lowestSellCost = resource.getMatchingUniques(UniqueType.AiWillSellAt, GameContext(civInfo))
                     .minOfOrNull { it.params[0].toInt() }
                 return lowestSellCost ?: Int.MAX_VALUE
             }
-            
             TradeOfferType.Technology -> return sqrt(civInfo.gameInfo.ruleset.technologies[offer.name]!!.cost.toDouble()).toInt() * 20
             TradeOfferType.Introduction -> return introductionValue(civInfo.gameInfo.ruleset)
             TradeOfferType.WarDeclaration -> {
@@ -348,7 +449,11 @@ class TradeEvaluation {
                     return (-25 * DeclareWarPlanEvaluator.evaluateDeclareWarPlan(civInfo, civToDeclareWarOn, null)).toInt().coerceAtLeast(0)
                 }
             }
-
+            TradeOfferType.PeaceProposal -> {
+                // We're evaluating peace cost for third civ to be paid by requesting civ (tradePartner) to us (civInfo)
+                val thirdCiv = civInfo.gameInfo.getCivilization(offer.name)
+                return evaluatePeaceCostForThem(civInfo, thirdCiv)
+            }
             TradeOfferType.City -> {
                 val city = civInfo.cities.firstOrNull { it.id == offer.name }
                     ?: throw Exception("Got an offer to sell city id " + offer.name + " which does't seem to exist for this civ!")
@@ -377,6 +482,7 @@ class TradeEvaluation {
      * This returns how much one gold is worth now in comparison to starting out the game
      * Gold is worth less as the civilization has a higher income
      */
+    @Readonly
     fun getGoldInflation(civInfo: Civilization): Double {
         val modifier = 1000.0
         val goldPerTurn = civInfo.stats.statsForNextTurn.gold.toDouble()
@@ -391,6 +497,7 @@ class TradeEvaluation {
      * and given how this method is used this ends up making such cities more expensive. That's how
      * I found it. I'm not sure it makes sense. One might also find arguments why cities closer to
      * the capital are more expensive. */
+    @Readonly
     private fun distanceCityTradeModifier(civInfo: Civilization, city: City): Int{
         val distanceToCapital = civInfo.getCapital()!!.getCenterTile().aerialDistanceTo(city.getCenterTile())
 
@@ -398,6 +505,7 @@ class TradeEvaluation {
         return (distanceToCapital - 500) * civInfo.getEraNumber()
     }
 
+    @Readonly
     fun evaluatePeaceCostForThem(ourCiv: Civilization, otherCiv: Civilization): Int {
         val ourCombatStrength = ourCiv.getStatForRanking(RankingType.Force)
         val theirCombatStrength = otherCiv.getStatForRanking(RankingType.Force)
@@ -437,10 +545,12 @@ class TradeEvaluation {
             // (stats ~30 each)
             val absoluteAdvantage = theirCombatStrength - ourCombatStrength
             val percentageAdvantage = absoluteAdvantage / ourCombatStrength.toFloat()
-            return -(absoluteAdvantage * percentageAdvantage / (getGoldInflation(ourCiv) * 2)).coerceAtMost(10000.0).toInt()
+            val peaceCost = absoluteAdvantage * percentageAdvantage / (getGoldInflation(ourCiv) * 2.0)
+            return -peaceCost.toInt().coerceAtMost(ourCiv.gameInfo.ruleset.modOptions.constants.maxGoldTradeOffer)
         }
     }
 
+    @Readonly
     private fun introductionValue(ruleSet: Ruleset): Int {
         val unique = ruleSet.modOptions.getMatchingUniques(UniqueType.TradeCivIntroductions).firstOrNull()
             ?: return 0

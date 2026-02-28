@@ -9,15 +9,25 @@ import com.unciv.logic.civilization.NotificationCategory
 import com.unciv.logic.civilization.NotificationIcon
 import com.unciv.logic.civilization.OverviewAction
 import com.unciv.models.ruleset.tile.ResourceType
+import com.unciv.models.ruleset.unique.UniqueTriggerActivation
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.ui.screens.overviewscreen.EmpireOverviewCategories
-import kotlin.math.min
 import kotlin.random.Random
 
 class CityTurnManager(val city: City) {
 
 
     fun startTurn() {
+        city.clearCaches()
+        
+        for (resource in city.getResourcesGeneratedByCity()) {
+            if (resource.resource.isStockpiled && resource.resource.isCityWide)
+                city.gainStockpiledResource(resource.resource, resource.amount)
+        }
+        for (unique in city.getTriggeredUniques(UniqueType.TriggerUponTurnStart, includeCivUniques = false).toList()) {
+            UniqueTriggerActivation.triggerUnique(unique, city)
+        }
+
         // Construct units at the beginning of the turn,
         // so they won't be generated out in the open and vulnerable to enemy attacks before you can control them
         city.cityConstructions.constructIfEnough()
@@ -34,7 +44,7 @@ class CityTurnManager(val city: City) {
         if (city.isPuppet) {
             city.setCityFocus(CityFocus.GoldFocus)
             city.reassignAllPopulation()
-        } else if (city.shouldReassignPopulation) {
+        } else if (city.shouldReassignPopulation || city.civ.isAI()) {
             city.reassignPopulation()  // includes cityStats.update
         } else
             city.cityStats.update()
@@ -93,10 +103,10 @@ class CityTurnManager(val city: City) {
             it.resourceType == ResourceType.Luxury && // Must be luxury
                     !it.hasUnique(UniqueType.CityStateOnlyResource) && // Not a city-state only resource eg jewelry
                     it.name != city.demandedResource && // Not same as last time
-                    it.name in city.tileMap.resources && // Must exist somewhere on the map
-                    city.getCenterTile().getTilesInDistance(city.getWorkRange()).none { nearTile -> nearTile.resource == it.name } // Not in this city's radius
+                    it in city.tileMap.resourceObjects && // Must exist somewhere on the map
+                    city.getCenterTile().getTilesInDistance(city.getWorkRange()).none { nearTile -> nearTile.tileResource == it } // Not in this city's radius
         }
-        val missingResources = candidates.filter { !city.civ.hasResource(it.name) }
+        val missingResources = candidates.filter { !city.civ.hasResource(it) }
         
         if (missingResources.isEmpty()) { // hooray happpy day forever!
             city.demandedResource = candidates.randomOrNull()?.name ?: ""
@@ -106,9 +116,10 @@ class CityTurnManager(val city: City) {
         val chosenResource = missingResources.randomOrNull()
         
         city.demandedResource = chosenResource?.name ?: "" // mods may have no resources as candidates even
-        if (city.demandedResource == "") // Failed to get a valid resource, try again some time later
-            city.setFlag(CityFlags.ResourceDemand, 15 + Random.Default.nextInt(10))
-        else
+        // Get a new resource in ~20 turns
+        city.setFlag(CityFlags.ResourceDemand, 15 + Random.Default.nextInt(10))
+        
+        if (city.demandedResource != "") // Failed to get a valid resource, try again some time later
             city.civ.addNotification("[${city.name}] demands [${city.demandedResource}]!",
                 listOf(LocationAction(city.location), OverviewAction(EmpireOverviewCategories.Resources)),
                 NotificationCategory.General, NotificationIcon.City, "ResourceIcons/${city.demandedResource}")
@@ -116,6 +127,9 @@ class CityTurnManager(val city: City) {
 
 
     fun endTurn() {
+        for (unique in city.getTriggeredUniques(UniqueType.TriggerUponTurnEnd, includeCivUniques = false).toList()) {
+            UniqueTriggerActivation.triggerUnique(unique, city)
+        }
         val stats = city.cityStats.currentCityStats
 
         city.cityConstructions.endTurn(stats)
@@ -146,9 +160,11 @@ class CityTurnManager(val city: City) {
         if (city.civ.gameInfo.isReligionEnabled()) city.religion.endTurn()
 
         if (city in city.civ.cities) { // city was not destroyed
-            city.health = min(city.health + 20, city.getMaxHealth())
+            city.health = (city.health + 20).coerceAtMost(city.getMaxHealth())
             city.population.unassignExtraPopulation()
         }
+        
+        city.clearCaches()
     }
 
 }

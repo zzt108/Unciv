@@ -2,9 +2,8 @@ package com.unciv.ui.screens.newgamescreen
 
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox
+import com.badlogic.gdx.scenes.scene2d.ui.Label
 import com.badlogic.gdx.scenes.scene2d.ui.Table
-import com.badlogic.gdx.scenes.scene2d.ui.TextField
-import com.badlogic.gdx.scenes.scene2d.ui.TextField.TextFieldFilter.DigitsOnlyFilter
 import com.badlogic.gdx.utils.Align
 import com.unciv.UncivGame
 import com.unciv.logic.map.*
@@ -12,7 +11,6 @@ import com.unciv.logic.map.mapgenerator.MapGenerator
 import com.unciv.logic.map.mapgenerator.MapResourceSetting
 import com.unciv.models.metadata.GameParameters
 import com.unciv.models.ruleset.RulesetCache
-import com.unciv.models.translations.tr
 import com.unciv.ui.components.extensions.*
 import com.unciv.ui.components.input.onChange
 import com.unciv.ui.components.input.onClick
@@ -34,12 +32,12 @@ class MapParametersTable(
     private val forMapEditor: Boolean = false,
     private val sizeChangedCallback: (()->Unit)? = null
 ) : Table() {
-    // These are accessed fom outside the class to read _and_ write values,
+    // These are accessed from outside the class to read _and_ write values,
     // namely from MapOptionsTable, NewMapScreen and NewGameScreen
     lateinit var mapTypeSelectBox: TranslatedSelectBox
-    lateinit var customMapSizeRadius: TextField
-    lateinit var customMapWidth: TextField
-    lateinit var customMapHeight: TextField
+    lateinit var customMapSizeRadius: UncivTextField.Integer
+    lateinit var customMapWidth: UncivTextField.Integer
+    lateinit var customMapHeight: UncivTextField.Integer
 
     private lateinit var worldSizeSelectBox: TranslatedSelectBox
     private var customWorldSizeTable = Table()
@@ -51,13 +49,13 @@ class MapParametersTable(
     private lateinit var worldWrapCheckbox: CheckBox
     private lateinit var legendaryStartCheckbox: CheckBox
     private lateinit var strategicBalanceCheckbox: CheckBox
-    private lateinit var seedTextField: TextField
+    private lateinit var seedTextField: UncivTextField.Numeric
 
     private lateinit var mapShapesOptionsValues: HashSet<String>
     private lateinit var mapTypesOptionsValues: HashSet<String>
     private lateinit var mapSizesOptionsValues: HashSet<String>
     private lateinit var mapResourcesOptionsValues: HashSet<String>
-    
+
     private val maxMapSize = ((previousScreen as? NewGameScreen)?.getColumnWidth() ?: 200f) - 10f // There is 5px padding each side
     private val mapTypeExample = Table()
 
@@ -66,6 +64,16 @@ class MapParametersTable(
     // A HashMap indexed on a Widget is problematic, as it does not define its own hashCode and equals
     // overrides nor is a Widget a data class. Seems to work anyway.
     private val advancedSliders = HashMap<UncivSlider, ()->Float>()
+
+    private lateinit var hexWarningLabel: Label
+    private lateinit var rectWarningLabel: Label
+
+    companion object {
+        private const val LARGE_MAP_WARNING = "This is a large map - may cause latency issues"
+        private const val VERY_LARGE_MAP_WARNING = "This is a very large map - may cause Out Of Memory crashes"
+        private const val LARGE_MAP_TILES = 4000
+        private const val VERY_LARGE_MAP_TILES = 16000
+    }
 
     // used only in map editor (forMapEditor == true)
     var randomizeSeed = true
@@ -98,7 +106,7 @@ class MapParametersTable(
 
     fun reseed() {
         mapParameters.reseed()
-        seedTextField.text = mapParameters.seed.tr()
+        seedTextField.value = mapParameters.seed
     }
 
     private fun addMapShapeSelectBox() {
@@ -131,7 +139,7 @@ class MapParametersTable(
             add(mapShapeSelectBox).fillX().row()
         }
     }
-    
+
     private fun generateExampleMap(){
         val ruleset = if (previousScreen is NewGameScreen) previousScreen.ruleset else RulesetCache.getVanillaRuleset()
         Concurrency.run("Generate example map") {
@@ -181,7 +189,7 @@ class MapParametersTable(
             add(optionsTable).colspan(2).grow().row()
         } else {
             mapTypeSelectBox = TranslatedSelectBox(mapTypes, mapParameters.type)
-            
+
 
             mapTypeSelectBox.onChange {
                 mapParameters.type = mapTypeSelectBox.selected.value
@@ -189,7 +197,7 @@ class MapParametersTable(
                 // If the map won't be generated, these options are irrelevant and are hidden
                 noRuinsCheckbox.isVisible = mapParameters.type != MapType.empty
                 noNaturalWondersCheckbox.isVisible = mapParameters.type != MapType.empty
-                
+
                 generateExampleMap()
             }
 
@@ -228,44 +236,57 @@ class MapParametersTable(
     }
 
     private fun addHexagonalSizeTable() {
-        val defaultRadius = mapParameters.mapSize.radius.tr()
-        customMapSizeRadius = UncivTextField("Radius", defaultRadius).apply {
-            textFieldFilter = DigitsOnlyFilter()
-        }
+        val defaultRadius = mapParameters.mapSize.radius
+        customMapSizeRadius = UncivTextField.Integer("Radius", defaultRadius)
         customMapSizeRadius.onChange {
-            mapParameters.mapSize = MapSize(customMapSizeRadius.text.toIntOrNull() ?: 0 )
+            mapParameters.mapSize = MapSize(customMapSizeRadius.intValue ?: 0)
+            updateHexagonalWarnings()
         }
+        hexWarningLabel = "".toLabel(Color.RED).apply { wrap = true }
         hexagonalSizeTable.add("{Radius}:".toLabel()).grow().left()
         hexagonalSizeTable.add(customMapSizeRadius).right().row()
-        hexagonalSizeTable.add("Anything above 40 may work very slowly on Android!".toLabel(Color.RED)
-            .apply { wrap=true }).width(prefWidth).colspan(hexagonalSizeTable.columns)
+        hexagonalSizeTable.add(hexWarningLabel).fillX().colspan(hexagonalSizeTable.columns).row()
+        updateHexagonalWarnings()
+    }
+
+    private fun updateHexagonalWarnings() {
+        val tiles = HexMath.getNumberOfTilesInHexagon(customMapSizeRadius.intValue ?: 0)
+        hexWarningLabel.isVisible = tiles >= LARGE_MAP_TILES
+        if (tiles >= VERY_LARGE_MAP_TILES) hexWarningLabel.setText(VERY_LARGE_MAP_WARNING)
+        else hexWarningLabel.setText(LARGE_MAP_WARNING)
     }
 
     private fun addRectangularSizeTable() {
-        val defaultWidth = mapParameters.mapSize.width.tr()
-        customMapWidth = UncivTextField("Width", defaultWidth).apply {
-            textFieldFilter = DigitsOnlyFilter()
-        }
-
-        val defaultHeight = mapParameters.mapSize.height.tr()
-        customMapHeight = UncivTextField("Height", defaultHeight).apply {
-            textFieldFilter = DigitsOnlyFilter()
-        }
+        val defaultWidth = mapParameters.mapSize.width
+        customMapWidth = UncivTextField.Integer("Width", defaultWidth)
+        val defaultHeight = mapParameters.mapSize.height
+        customMapHeight = UncivTextField.Integer("Height", defaultHeight)
 
         customMapWidth.onChange {
-            mapParameters.mapSize = MapSize(customMapWidth.text.toIntOrNull() ?: 0, customMapHeight.text.toIntOrNull() ?: 0)
+            mapParameters.mapSize = MapSize(customMapWidth.intValue ?: 0, customMapHeight.intValue ?: 0)
+            updateRectangularWarnings()
         }
         customMapHeight.onChange {
-            mapParameters.mapSize = MapSize(customMapWidth.text.toIntOrNull() ?: 0, customMapHeight.text.toIntOrNull() ?: 0)
+            mapParameters.mapSize = MapSize(customMapWidth.intValue ?: 0, customMapHeight.intValue ?: 0)
+            updateRectangularWarnings()
         }
+
+        rectWarningLabel = "".toLabel(Color.RED).apply { wrap = true }
 
         rectangularSizeTable.defaults().pad(5f)
         rectangularSizeTable.add("{Width}:".toLabel()).grow().left()
         rectangularSizeTable.add(customMapWidth).right().row()
         rectangularSizeTable.add("{Height}:".toLabel()).grow().left()
         rectangularSizeTable.add(customMapHeight).right().row()
-        rectangularSizeTable.add("Anything above 80 by 50 may work very slowly on Android!".toLabel(Color.RED)
-            .apply { wrap = true }).width(prefWidth).colspan(hexagonalSizeTable.columns)
+        rectangularSizeTable.add(rectWarningLabel).fillX().colspan(hexagonalSizeTable.columns).row()
+        updateRectangularWarnings()
+    }
+
+    private fun updateRectangularWarnings() {
+        val tiles = (customMapWidth.intValue ?: 0) * (customMapHeight.intValue ?: 0)
+        rectWarningLabel.isVisible = tiles >= LARGE_MAP_TILES
+        if (tiles >= VERY_LARGE_MAP_TILES) rectWarningLabel.setText(VERY_LARGE_MAP_WARNING)
+        else rectWarningLabel.setText(LARGE_MAP_WARNING)
     }
 
     private fun updateWorldSizeTable() {
@@ -384,35 +405,26 @@ class MapParametersTable(
     private fun addAdvancedControls(table: Table) {
         table.defaults().pad(2f).padTop(10f)
 
-        seedTextField = UncivTextField("RNG Seed", mapParameters.seed.tr())
-        seedTextField.textFieldFilter = DigitsOnlyFilter()
+        seedTextField = UncivTextField.Numeric("RNG Seed", mapParameters.seed, integerOnly = true)
 
-        // If the field is empty, fallback seed value to 0
         seedTextField.onChange {
-            mapParameters.seed = try {
-                seedTextField.text.toLong()
-            } catch (_: Exception) {
-                0L
-            }
+            mapParameters.seed = seedTextField.value?.toLong() ?: 0L
         }
 
         table.add("RNG Seed".toLabel()).left()
         table.add(seedTextField).fillX().padBottom(10f).row()
 
-        fun addSlider(text: String, getValue:()->Float, min: Float, max: Float, onChange: (value: Float)->Unit): UncivSlider {
-            val slider = UncivSlider(min, max, (max - min) / 20, onChange = {onChange(it); generateExampleMap()}, initial = getValue())
+        fun addSlider(text: String, getValue:()->Float, min: Float, max: Float, step: Float, onChange: (value: Float)->Unit): UncivSlider {
+            val slider = UncivSlider(min, max, step, onChange = {onChange(it); generateExampleMap()}, initial = getValue())
             table.add(text.toLabel()).left()
             table.add(slider).fillX().row()
             advancedSliders[slider] = getValue
             return slider
         }
 
-        fun addSlider(text: String, getValue:()->Float, min: Float, max: Float, step: Float, onChange: (value: Float)->Unit): UncivSlider {
-            val slider = UncivSlider(min, max, step, onChange = onChange, initial = getValue())
-            table.add(text.toLabel()).left()
-            table.add(slider).fillX().row()
-            advancedSliders[slider] = getValue
-            return slider
+        fun addSlider(text: String, getValue:()->Float, min: Float, max: Float, onChange: (value: Float)->Unit): UncivSlider {
+            val step = (max - min) / 20
+            return addSlider(text, getValue, min, max, step, onChange)
         }
 
         fun addTextButton(text: String, shouldAddToTable: Boolean = false, action: ((Boolean) -> Unit)) {
@@ -464,7 +476,7 @@ class MapParametersTable(
 
         addTextButton("Reset to defaults", true) {
             mapParameters.resetAdvancedSettings()
-            seedTextField.text = mapParameters.seed.tr()
+            seedTextField.value = mapParameters.seed
             for (entry in advancedSliders)
                 entry.key.value = entry.value()
         }

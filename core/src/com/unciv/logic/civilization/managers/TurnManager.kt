@@ -4,13 +4,7 @@ import com.unciv.UncivGame
 import com.unciv.logic.VictoryData
 import com.unciv.logic.automation.civilization.NextTurnAutomation
 import com.unciv.logic.city.managers.CityTurnManager
-import com.unciv.logic.civilization.AlertType
-import com.unciv.logic.civilization.CivFlags
-import com.unciv.logic.civilization.Civilization
-import com.unciv.logic.civilization.NotificationCategory
-import com.unciv.logic.civilization.NotificationIcon
-import com.unciv.logic.civilization.PlayerType
-import com.unciv.logic.civilization.PopupAlert
+import com.unciv.logic.civilization.*
 import com.unciv.logic.civilization.diplomacy.DiplomacyTurnManager.nextTurn
 import com.unciv.logic.map.mapunit.UnitTurnManager
 import com.unciv.logic.map.tile.Tile
@@ -22,6 +16,7 @@ import com.unciv.models.stats.Stats
 import com.unciv.ui.components.MayaCalendar
 import com.unciv.ui.screens.worldscreen.status.NextTurnProgress
 import com.unciv.utils.Log
+import yairm210.purity.annotations.Readonly
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -70,7 +65,7 @@ class TurnManager(val civInfo: Civilization) {
         startTurnFlags()
         updateRevolts()
 
-        for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponTurnStart, civInfo.state))
+        for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponTurnStart, civInfo.state, ignoreCities = true))
             UniqueTriggerActivation.triggerUnique(unique, civInfo)
 
         for (city in civInfo.cities) {
@@ -92,7 +87,15 @@ class TurnManager(val civInfo: Civilization) {
                 civInfo.tradeRequests.remove(tradeRequest)
                 // Yes, this is the right direction. I checked.
                 offeringCiv.addNotification("Our proposed trade is no longer relevant!", NotificationCategory.Trade, NotificationIcon.Trade)
+                // If it's a counteroffer, remove notification
+                civInfo.notifications.removeAll { it.text == "[${offeringCiv.civName}] has made a counteroffer to your trade request" }
             }
+        }
+        
+        for (unit in civInfo.units.getCivUnits().filter { it.promotions.canBePromoted() }){
+            civInfo.addNotification("[${unit.displayName()}] can be promoted!",
+                listOf(MapUnitAction(unit), PromoteUnitAction(unit)),
+                NotificationCategory.Units, unit.name)
         }
 
         updateWinningCiv()
@@ -106,7 +109,7 @@ class TurnManager(val civInfo: Civilization) {
 
             if (flag == CivFlags.CityStateGreatPersonGift.name) {
                 val cityStateAllies: List<Civilization> =
-                        civInfo.getKnownCivs().filter { it.isCityState && it.getAllyCiv() == civInfo.civName }.toList()
+                        civInfo.getKnownCivs().filter { it.isCityState && it.allyCiv == civInfo }.toList()
                 val givingCityState = cityStateAllies.filter { it.cities.isNotEmpty() }.randomOrNull()
 
                 if (cityStateAllies.isNotEmpty()) civInfo.flagsCountdown[flag] = civInfo.flagsCountdown[flag]!! - 1
@@ -210,6 +213,7 @@ class TurnManager(val civInfo: Civilization) {
     }
 
     // Higher is better
+    @Readonly
     private fun rateTileForRevoltSpawn(tile: Tile): Int {
         if (tile.isWater || tile.militaryUnit != null || tile.civilianUnit != null || tile.isCityCenter() || tile.isImpassible())
             return -1
@@ -224,7 +228,8 @@ class TurnManager(val civInfo: Civilization) {
             score += 4
         return score
     }
-
+    
+    @Readonly
     private fun getTurnsBeforeRevolt() =
         ((civInfo.gameInfo.ruleset.modOptions.constants.baseTurnsUntilRevolt + Random.Default.nextInt(3)) 
             * civInfo.gameInfo.speed.modifier.coerceAtLeast(1f)).toInt()
@@ -234,7 +239,7 @@ class TurnManager(val civInfo: Civilization) {
         if (UncivGame.Current.settings.citiesAutoBombardAtEndOfTurn)
             NextTurnAutomation.automateCityBombardment(civInfo) // Bombard with all cities that haven't, maybe you missed one
 
-        for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponTurnEnd, civInfo.state))
+        for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponTurnEnd, civInfo.state, ignoreCities = true))
             UniqueTriggerActivation.triggerUnique(unique, civInfo)
 
         val notificationsLog = civInfo.notificationsLog
@@ -242,16 +247,17 @@ class TurnManager(val civInfo: Civilization) {
         notificationsThisTurn.notifications.addAll(civInfo.notifications)
 
         while (notificationsLog.size >= UncivGame.Current.settings.notificationsLogMaxTurns) {
-            notificationsLog.removeFirst()
+            notificationsLog.removeAt(0)
         }
 
         if (notificationsThisTurn.notifications.isNotEmpty())
             notificationsLog.add(notificationsThisTurn)
 
         civInfo.notifications.clear()
+        civInfo.notificationCountAtStartTurn = null
 
         if (civInfo.isDefeated() || civInfo.isSpectator()) return  // yes they do call this, best not update any further stuff
-
+        
         var nextTurnStats =
             if (civInfo.isBarbarian)
                 Stats()
@@ -315,7 +321,7 @@ class TurnManager(val civInfo: Civilization) {
         civInfo.diplomacy.values.toList().forEach { it.nextTurn() } // we copy the diplomacy values so if it changes in-loop we won't crash
         civInfo.cache.updateHasActiveEnemyMovementPenalty()
 
-        civInfo.cachedMilitaryMight = -1    // Reset so we don't use a value from a previous turn
+        civInfo.resetMilitaryMightCache()
 
         updateWinningCiv() // Maybe we did something this turn to win
     }
@@ -326,7 +332,7 @@ class TurnManager(val civInfo: Civilization) {
         val victoryType = civInfo.victoryManager.getVictoryTypeAchieved()
         if (victoryType != null) {
             civInfo.gameInfo.victoryData =
-                    VictoryData(civInfo.civName, victoryType, civInfo.gameInfo.turns)
+                    VictoryData(civInfo, victoryType, civInfo.gameInfo.turns)
 
             // Notify other human players about this civInfo's victory
             for (otherCiv in civInfo.gameInfo.civilizations) {

@@ -6,29 +6,151 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.restrictTo
-import io.ktor.application.call
-import io.ktor.application.log
-import io.ktor.http.HttpStatusCode
-import io.ktor.request.receiveText
-import io.ktor.response.respond
-import io.ktor.response.respondText
-import io.ktor.routing.get
-import io.ktor.routing.put
-import io.ktor.routing.routing
-import io.ktor.server.engine.embeddedServer
-import io.ktor.server.engine.stop
-import io.ktor.server.netty.Netty
-import io.ktor.utils.io.jvm.javaio.toInputStream
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.*
+import io.ktor.serialization.kotlinx.json.*
+import io.ktor.server.application.*
+import io.ktor.server.auth.*
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.ktor.server.websocket.*
+import io.ktor.utils.io.jvm.javaio.*
+import io.ktor.websocket.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.ClassDiscriminatorMode
+import kotlinx.serialization.json.Json
 import java.io.File
-import java.util.Base64
+import java.util.Collections.synchronizedMap
+import java.util.Collections.synchronizedSet
 import java.util.concurrent.TimeUnit
-
+import kotlin.time.Duration.Companion.seconds
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 internal object UncivServer {
     @JvmStatic
     fun main(args: Array<String>) = UncivServerRunner().main(args)
+}
+
+@Serializable
+data class IsAliveInfo(val authVersion: Int, val chatVersion: Int)
+
+@Serializable
+sealed class Message {
+    @Serializable
+    @SerialName("chat")
+    data class Chat(
+        val civName: String, val message: String, val gameId: String
+    ) : Message()
+
+    @Serializable
+    @SerialName("join")
+    data class Join(
+        val gameIds: List<String>
+    ) : Message()
+
+    @Serializable
+    @SerialName("leave")
+    data class Leave(
+        val gameIds: List<String>
+    ) : Message()
+}
+
+// used when receiving a message
+@Serializable
+sealed class Response {
+    @Serializable
+    @SerialName("chat")
+    data class Chat(
+        val civName: String, val message: String, val gameId: String? = null
+    ) : Response()
+
+    @Serializable
+    @SerialName("joinSuccess")
+    data class JoinSuccess(
+        val gameIds: List<String>
+    ) : Response()
+
+    @Serializable
+    @SerialName("error")
+    data class Error(
+        val message: String
+    ) : Response()
+}
+
+@OptIn(ExperimentalUuidApi::class)
+private class WebSocketSessionManager {
+    private val gameId2WSSessions = synchronizedMap(mutableMapOf<Uuid, MutableSet<DefaultWebSocketServerSession>>())
+    private val wsSession2GameIds = synchronizedMap(mutableMapOf<DefaultWebSocketServerSession, MutableSet<Uuid>>())
+
+    fun isSubscribed(session: DefaultWebSocketServerSession, gameId: Uuid): Boolean =
+        gameId2WSSessions.getOrPut(gameId) { synchronizedSet(mutableSetOf()) }.contains(session)
+
+    fun subscribe(session: DefaultWebSocketServerSession, gameIds: List<String>): List<String> {
+        val uuids = gameIds.mapNotNull { it.toUuidOrNull() }
+
+        wsSession2GameIds.getOrPut(session) { synchronizedSet(mutableSetOf()) }.addAll(uuids)
+        for (uuid in uuids) {
+            gameId2WSSessions.getOrPut(uuid) { synchronizedSet(mutableSetOf()) }.add(session)
+        }
+
+        return uuids.map { it.toString() }
+    }
+
+    fun unsubscribe(session: DefaultWebSocketServerSession, gameIds: List<String>) {
+        val uuids = gameIds.mapNotNull { it.toUuidOrNull() }
+        wsSession2GameIds[session]?.removeAll(uuids)
+        for (uuid in uuids) {
+            gameId2WSSessions[uuid]?.remove(session)
+        }
+    }
+
+    suspend fun publish(gameId: Uuid, message: Response) {
+        val sessions = gameId2WSSessions.getOrPut(gameId) { synchronizedSet(mutableSetOf()) }
+        for (session in sessions) {
+            if (!session.isActive) {
+                sessions.remove(session)
+                continue
+            }
+            session.sendSerialized(message)
+        }
+    }
+
+    fun cleanupSession(session: DefaultWebSocketServerSession) {
+        for (gameId in wsSession2GameIds.remove(session) ?: emptyList()) {
+            val gameIds = gameId2WSSessions[gameId] ?: continue
+            gameIds.remove(session)
+            if (gameIds.isEmpty()) {
+                gameId2WSSessions.remove(gameId)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalUuidApi::class)
+data class BasicAuthInfo(
+    val userId: Uuid,
+    val password: String,
+)
+
+/**
+ * Checks if a [String] is a valid UUID
+ */
+@OptIn(ExperimentalUuidApi::class)
+private fun String.toUuidOrNull() = try {
+    Uuid.parse(this)
+} catch (_: Throwable) {
+    null
 }
 
 private class UncivServerRunner : CliktCommand() {
@@ -48,22 +170,37 @@ private class UncivServerRunner : CliktCommand() {
         "-a", "-auth",
         envvar = "UncivServerAuth",
         help = "Enable Authentication"
-    ).flag("-no-auth", default = false)
+    ).flag("-no-auth", default = true)
 
-     private val identifyOperators by option(
+    private val chatV1Enabled by option(
+        "-c", "-chat",
+        envvar = "UncivServerChat",
+        help = "Enable Authentication"
+    ).flag("-no-chat", default = true)
+
+    private val identifyOperators by option(
         "-i", "-Identify",
         envvar = "UncivServerIdentify",
         help = "Display each operation archive request IP to assist management personnel"
     ).flag("-no-Identify", default = false)
 
+    lateinit var isAliveInfo: IsAliveInfo
 
     override fun run() {
+        isAliveInfo = IsAliveInfo(
+            authVersion = if (authV1Enabled) 1 else 0,
+            chatVersion = if (chatV1Enabled) 1 else 0,
+        )
         serverRun(port, folder)
     }
 
     // region Auth
-    private val authMap: MutableMap<String, String> = mutableMapOf()
+    @OptIn(ExperimentalUuidApi::class)
+    private val authMap: MutableMap<Uuid, String> = mutableMapOf()
 
+    private val wsSessionManager = WebSocketSessionManager()
+
+    @OptIn(ExperimentalUuidApi::class)
     private fun loadAuthFile() {
         val authFile = File("server.auth")
         if (!authFile.exists()) {
@@ -71,11 +208,13 @@ private class UncivServerRunner : CliktCommand() {
             authFile.createNewFile()
         } else {
             authMap.putAll(
-                authFile.readLines().map { it.split(":") }.associate { it[0] to it[1] }
+                authFile.readLines().map { it.split(":") }
+                    .associate { Uuid.parse(it[0]) to it[1] }
             )
         }
     }
 
+    @OptIn(ExperimentalUuidApi::class)
     private fun saveAuthFile() {
         val authFile = File("server.auth")
         authFile.writeText(authMap.map { "${it.key}:${it.value}" }.joinToString("\n"))
@@ -85,135 +224,215 @@ private class UncivServerRunner : CliktCommand() {
      * @return true if either auth is disabled, no password is set for the current player,
      * or the password is correct
      */
-    private fun validateGameAccess(file: File, authString: String?): Boolean {
+    private fun validateGameAccess(file: File, authInfo: BasicAuthInfo): Boolean {
         if (!file.exists())
             return true
 
-        return validateAuth(authString)
+        return validateAuth(authInfo)
 
         // TODO Check if the user is the current player and validate its password this requires decoding the game file
     }
 
-    private fun validateAuth(authString: String?): Boolean {
-        if (!authV1Enabled)
-            return true
+    private fun validateAuth(authInfo: BasicAuthInfo): Boolean {
+        if (!authV1Enabled) return true
 
-        val (userId, password) = extractAuth(authString) ?: return false
-        return authMap[userId] == null || authMap[userId] == password
-    }
-
-    private fun extractAuth(authHeader: String?): Pair<String, String>? {
-        if (!authV1Enabled)
-            return null
-
-        // If auth is enabled an authorization header is required
-        if (authHeader == null || !authHeader.startsWith("Basic "))
-            return null
-
-        val decodedString = String(Base64.getDecoder().decode(authHeader.drop(6)))
-        val splitAuthString = decodedString.split(":", limit=2)
-        if (splitAuthString.size != 2)
-            return null
-
-        return splitAuthString.let { it[0] to it[1] }
+        @OptIn(ExperimentalUuidApi::class) val password = authMap[authInfo.userId]
+        return password == null || password == authInfo.password
     }
     // endregion Auth
 
     private fun serverRun(serverPort: Int, fileFolderName: String) {
         val portStr: String = if (serverPort == 80) "" else ":$serverPort"
-        
+
         val file = File(fileFolderName)
         echo("Starting UncivServer for ${file.absolutePath} on http://localhost$portStr")
         if (!file.exists()) file.mkdirs()
         val server = embeddedServer(Netty, port = serverPort) {
-            routing {
-                get("/isalive") {
-                    log.info("Received isalive request from ${call.request.local.remoteHost}")
-                    call.respondText("{authVersion: ${if (authV1Enabled) "1" else "0"}}")
-                }
-                put("/files/{fileName}") {
-                    val fileName = call.parameters["fileName"] ?: throw Exception("No fileName!")
-                    
-                    // If IdentifyOperators is enabled an Operator IP is displayed
-                    if (identifyOperators) {
-                        log.info("Receiving file: $fileName --Operation sourced from ${call.request.local.remoteHost}")
-                    }else{
-                        log.info("Receiving file: $fileName")
-                    }
-                     
-                    val file = File(fileFolderName, fileName)
+            install(ContentNegotiation) { json() }
 
-                    if (!validateGameAccess(file, call.request.headers["Authorization"])) {
-                        call.respond(HttpStatusCode.Unauthorized)
-                        return@put
-                    }
+            install(Authentication) {
+                basic {
+                    realm = "Optional for /files and /auth, Mandatory for /chat"
 
-                    withContext(Dispatchers.IO) {
-                        file.outputStream().use {
-                            call.request.receiveChannel().toInputStream().copyTo(it)
+                    @OptIn(ExperimentalUuidApi::class) validate {
+                        return@validate try {
+                            BasicAuthInfo(userId = Uuid.parse(it.name), password = it.password)
+                        } catch (_: Throwable) {
+                            null
                         }
                     }
-                    call.respond(HttpStatusCode.OK)
                 }
-                get("/files/{fileName}") {
-                    val fileName = call.parameters["fileName"] ?: throw Exception("No fileName!")
-                    
-                    // If IdentifyOperators is enabled an Operator IP is displayed
-                    if (identifyOperators) {
-                        log.info("File requested: $fileName --Operation sourced from ${call.request.local.remoteHost}")
-                    }else{
-                        log.info("File requested: $fileName")
-                    }
-                     
-                    val file = File(fileFolderName, fileName)
-                    if (!file.exists()) {
+            }
+
+            if (chatV1Enabled) install(WebSockets) {
+                pingPeriod = 30.seconds
+                timeout = 60.seconds
+                maxFrameSize = Long.MAX_VALUE
+                @OptIn(ExperimentalSerializationApi::class)
+                contentConverter = KotlinxWebsocketSerializationConverter(Json {
+                    classDiscriminator = "type"
+                    // DO NOT OMIT
+                    // if omitted the "type" field will be missing from all outgoing messages
+                    classDiscriminatorMode = ClassDiscriminatorMode.ALL_JSON_OBJECTS
+                })
+            }
+
+            routing {
+                get("/isalive") {
+                    call.application.log.info("Received isalive request from ${call.request.local.remoteHost}")
+                    call.respond(isAliveInfo)
+                }
+
+                @OptIn(ExperimentalUuidApi::class) authenticate {
+                    put("/files/{fileName}") {
+                        val fileName = call.parameters["fileName"] ?: return@put call.respond(
+                            HttpStatusCode.BadRequest, "Missing filename!"
+                        )
+
+                        val authInfo = call.principal<BasicAuthInfo>() ?: return@put call.respond(
+                            HttpStatusCode.BadRequest, "Possibly malformed authentication header!"
+                        )
 
                         // If IdentifyOperators is enabled an Operator IP is displayed
                         if (identifyOperators) {
-                            log.info("File $fileName not found --Operation sourced from ${call.request.local.remoteHost}")
+                            call.application.log.info("Receiving file: $fileName --Operation sourced from ${call.request.local.remoteHost}")
                         } else {
-                            log.info("File $fileName not found")
+                            call.application.log.info("Receiving file: $fileName")
                         }
-                        call.respond(HttpStatusCode.NotFound, "File does not exist")
-                        return@get
+
+                        val file = File(fileFolderName, fileName)
+                        if (!validateGameAccess(file, authInfo)) return@put call.respond(HttpStatusCode.Unauthorized)
+
+                        withContext(Dispatchers.IO) {
+                            file.outputStream().use {
+                                call.request.receiveChannel().toInputStream().copyTo(it)
+                            }
+                        }
+                        call.respond(HttpStatusCode.OK)
                     }
-                    val fileText = withContext(Dispatchers.IO) { file.readText() }
+                    get("/files/{fileName}") {
+                        val fileName = call.parameters["fileName"] ?: return@get call.respond(
+                            HttpStatusCode.BadRequest, "Missing filename!"
+                        )
 
-                    call.respondText(fileText)
-                }
-                if (authV1Enabled) {
-                    get("/auth") {
-                        log.info("Received auth request from ${call.request.local.remoteHost}")
-
-                        val authHeader = call.request.headers["Authorization"] ?: run {
-                            call.respond(HttpStatusCode.BadRequest, "Missing authorization header!")
-                            return@get
+                        // If IdentifyOperators is enabled an Operator IP is displayed
+                        if (identifyOperators) {
+                            call.application.log.info("File requested: $fileName --Operation sourced from ${call.request.local.remoteHost}")
+                        } else {
+                            call.application.log.info("File requested: $fileName")
                         }
 
-                        val (userId, password) = extractAuth(authHeader) ?: run {
-                            call.respond(HttpStatusCode.BadRequest, "Malformed authorization header!")
-                            return@get
+                        val file = File(fileFolderName, fileName)
+                        if (!file.exists()) {
+                            // If IdentifyOperators is enabled an Operator IP is displayed
+                            if (identifyOperators) {
+                                call.application.log.info("File $fileName not found --Operation sourced from ${call.request.local.remoteHost}")
+                            } else {
+                                call.application.log.info("File $fileName not found")
+                            }
+
+                            return@get call.respond(HttpStatusCode.NotFound, "File does not exist")
                         }
 
-                        when (authMap[userId]) {
-                            null -> call.respond(HttpStatusCode.NoContent)
-                            password -> call.respond(HttpStatusCode.OK)
-                            else -> call.respond(HttpStatusCode.Unauthorized)
-                        }
+                        val fileText = withContext(Dispatchers.IO) { file.readText() }
+                        call.respondText(fileText)
                     }
-                    put("/auth") {
-                        log.info("Received auth password set from ${call.request.local.remoteHost}")
-                        val authHeader = call.request.headers["Authorization"]
-                        if (validateAuth(authHeader)) {
-                            val (userId, _) = extractAuth(authHeader) ?: Pair(null, null)
-                            if (userId != null) {
-                                authMap[userId] = call.receiveText()
+                    if (authV1Enabled) {
+                        get("/auth") {
+                            call.application.log.info("Received auth request from ${call.request.local.remoteHost}")
+
+                            val authInfo = call.principal<BasicAuthInfo>() ?: return@get call.respond(
+                                HttpStatusCode.BadRequest, "Possibly malformed authentication header!"
+                            )
+
+                            when (authMap[authInfo.userId]) {
+                                null -> call.respond(HttpStatusCode.NoContent)
+                                authInfo.password -> call.respond(HttpStatusCode.OK)
+                                else -> call.respond(HttpStatusCode.Unauthorized)
+                            }
+                        }
+                        put("/auth") {
+                            call.application.log.info("Received auth password set from ${call.request.local.remoteHost}")
+
+                            val authInfo = call.principal<BasicAuthInfo>() ?: return@put call.respond(
+                                HttpStatusCode.BadRequest, "Possibly malformed authentication header!"
+                            )
+
+                            val password = authMap[authInfo.userId]
+                            if (password == null || password == authInfo.password) {
+                                val newPassword = call.receiveText()
+                                if (newPassword.length < 6) return@put call.respond(
+                                    HttpStatusCode.BadRequest, "Password should be at least 6 characters long"
+                                )
+                                authMap[authInfo.userId] = newPassword
                                 call.respond(HttpStatusCode.OK)
                             } else {
-                                call.respond(HttpStatusCode.BadRequest)
+                                call.respond(HttpStatusCode.Unauthorized)
                             }
-                        } else {
-                            call.respond(HttpStatusCode.Unauthorized)
+                        }
+                    }
+
+                    if (chatV1Enabled) webSocket("/chat") {
+                        val authInfo = call.principal<BasicAuthInfo>()
+                        if (authInfo == null) {
+                            sendSerialized(Response.Error("No authentication info found!"))
+                            return@webSocket close()
+                        }
+
+                        val serverPassword = authMap[authInfo.userId]
+                        if (serverPassword == null || serverPassword != authInfo.password) {
+                            sendSerialized(Response.Error("Authentication failed!"))
+                            return@webSocket close()
+                        }
+
+                        try {
+                            while (isActive) {
+                                when (val message = receiveDeserialized<Message>()) {
+                                    is Message.Chat -> {
+                                        val gameId = message.gameId.toUuidOrNull()
+                                        if (gameId == null) {
+                                            sendSerialized(
+                                                Response.Chat(
+                                                    civName = "Server",
+                                                    message = "Invalid gameId: '${message.gameId}'. Cannot relay the message!",
+                                                )
+                                            )
+                                            continue
+                                        }
+
+                                        if (wsSessionManager.isSubscribed(this, gameId)) {
+                                            wsSessionManager.publish(
+                                                gameId = gameId, message = Response.Chat(
+                                                    civName = message.civName,
+                                                    message = message.message,
+                                                    gameId = message.gameId,
+                                                )
+                                            )
+                                        } else {
+                                            sendSerialized(Response.Error("You are not subscribed to this channel!"))
+                                        }
+                                    }
+
+                                    is Message.Join -> {
+                                        sendSerialized(
+                                            Response.JoinSuccess(
+                                                gameIds = wsSessionManager.subscribe(
+                                                    this, message.gameIds
+                                                )
+                                            )
+                                        )
+                                    }
+
+                                    is Message.Leave -> wsSessionManager.unsubscribe(this, message.gameIds)
+                                }
+                                yield()
+                            }
+                        } catch (err: Throwable) {
+                            println("An WebSocket session closed due to ${err.message}")
+                            wsSessionManager.cleanupSession(this)
+                        } finally {
+                            println("An WebSocket session closed normally.")
+                            wsSessionManager.cleanupSession(this)
                         }
                     }
                 }

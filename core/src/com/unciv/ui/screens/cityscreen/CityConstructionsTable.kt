@@ -199,7 +199,7 @@ class CityConstructionsTable(private val cityScreen: CityScreen) {
 
         val city = cityScreen.city
         val cityConstructions = city.cityConstructions
-        val currentConstruction = cityConstructions.currentConstructionFromQueue
+        val currentConstruction = cityConstructions. currentConstructionName()
         val queue = cityConstructions.constructionQueue
 
         constructionsQueueTable.defaults().pad(0f)
@@ -355,7 +355,7 @@ class CityConstructionsTable(private val cityScreen: CityScreen) {
                             && constructionButtonDTOList.any {
                                 (it.construction is Building) && (it.construction.name == dto.construction.requiredBuilding
                                         || it.construction.replaces == dto.construction.requiredBuilding
-                                        || it.construction.hasUnique(dto.construction.requiredBuilding!!, cityScreen.city.state))
+                                        || it.construction.hasTagUnique(dto.construction.requiredBuilding!!, cityScreen.city.state))
                             })
                         continue
 

@@ -10,6 +10,7 @@ import com.unciv.models.stats.Stat
 import com.unciv.models.translations.fillPlaceholders
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.extensions.getConsumesAmountString
+import com.unciv.ui.components.extensions.getCostsAmountString
 import com.unciv.ui.components.extensions.toStringSigned
 import com.unciv.ui.components.fonts.Fonts
 import com.unciv.ui.screens.civilopediascreen.FormattedLine
@@ -32,7 +33,7 @@ object BuildingDescriptions {
             if (replacementTextForUniques.isNotEmpty()) infoList += replacementTextForUniques
             else infoList += getUniquesStringsWithoutDisablers(uniqueInclusionFilter)
         }
-        if (cityStrength != 0) infoList += "{City strength} +$cityStrength"
+        if (cityStrength != 0.0) infoList += "{City strength} +$cityStrength"
         if (cityHealth != 0) infoList += "{City health} +$cityHealth"
         val separator = if (multiline) "\n" else "; "
         return infoList.joinToString(separator) { it.tr() }
@@ -48,19 +49,27 @@ object BuildingDescriptions {
         if (isWonder) translatedLines += "Wonder".tr()
         if (isNationalWonder) translatedLines += "National Wonder".tr()
         if (!isFree) {
+            // Consumes
             for ((resourceName, amount) in getResourceRequirementsPerTurn(city.state)) {
-                val available = city.getAvailableResourceAmount(resourceName)
+                val available = if (showAdditionalInfo) city.getAvailableResourceAmount(resourceName) else -1
                 val resource = city.getRuleset().tileResources[resourceName] ?: continue
-                val consumesString = resourceName.getConsumesAmountString(amount, resource.isStockpiled)
+                translatedLines += resourceName.getConsumesAmountString(amount, resource.isStockpiled, available).tr()
+            }
 
-                translatedLines += if (showAdditionalInfo) "$consumesString ({[$available] available})".tr()
-                else consumesString.tr()
+            // Costs
+            for ((resourceName, amount) in getStockpiledResourceRequirements(city.state)) {
+                val resource = city.getRuleset().tileResources[resourceName] ?: continue
+                val available = if (showAdditionalInfo) city.getAvailableResourceAmount(resourceName) else -1
+                translatedLines += resourceName.getCostsAmountString(amount, available).tr()
             }
         }
 
         if (uniques.isNotEmpty()) {
             if (replacementTextForUniques.isNotEmpty()) translatedLines += replacementTextForUniques.tr()
-            else translatedLines += getUniquesStringsWithoutDisablers{ it.type != UniqueType.ConsumesResources }.map { it.tr() }
+            else translatedLines += getUniquesStringsWithoutDisablers {
+                it.type != UniqueType.ConsumesResources &&
+                it.type != UniqueType.CostsResources
+            }.map { it.tr() }
         }
         if (!stats.isEmpty())
             translatedLines += stats.toString()
@@ -77,7 +86,7 @@ object BuildingDescriptions {
         if (requiredNearbyImprovedResources != null)
             translatedLines += "Requires improved [${requiredNearbyImprovedResources!!.joinToString("/") { it.tr() }}] near city".tr()
 
-        if (cityStrength != 0) translatedLines += "{City strength} +$cityStrength".tr()
+        if (cityStrength != 0.0) translatedLines += "{City strength} +$cityStrength".tr()
         if (cityHealth != 0) translatedLines += "{City health} +$cityHealth".tr()
         if (maintenance != 0 && !isFree) translatedLines += "{Maintenance cost}: $maintenance {Gold}".tr()
         if (showAdditionalInfo) additionalDescription(building, city, translatedLines)
@@ -127,7 +136,7 @@ object BuildingDescriptions {
         val replacementStatBonus = replacementBuilding.getStatPercentageBonuses(null)
         for (stat in Stat.entries)
             if (replacementStatBonus[stat] != originalStatBonus[stat])
-                yield(FormattedLine("[${replacementStatBonus[stat].toInt()}]% ".tr() + stat.name.tr() + " vs [${originalStatBonus[stat].toInt()}]% ".tr() + stat.name.tr(), indent = 1))
+                yield(FormattedLine("[${replacementStatBonus[stat].toInt()}]% [${stat.name}] vs [${originalStatBonus[stat].toInt()}]% [${stat.name}]", indent=1))
 
         if (replacementBuilding.maintenance != originalBuilding.maintenance)
             yield(FormattedLine("{Maintenance} ".tr() + "[${replacementBuilding.maintenance}] vs [${originalBuilding.maintenance}]".tr(), indent=1))
@@ -182,9 +191,13 @@ object BuildingDescriptions {
         if (requiredTech != null)
             textList += FormattedLine("Required tech: [$requiredTech]",
                 link="Technology/$requiredTech")
-        if (requiredBuilding != null)
-            textList += FormattedLine("Requires [$requiredBuilding] to be built in the city",
-                link="Building/$requiredBuilding")
+        if (requiredBuilding != null) {
+            val linkType = if (ruleset.buildings[requiredBuilding]?.isWonder == true) "Wonder" else "Building"
+            textList += FormattedLine(
+                "Requires [$requiredBuilding] to be built in the city",
+                link="$linkType/$requiredBuilding"
+            )
+        }
 
         if (requiredResource != null) {
             textList += FormattedLine()
@@ -237,8 +250,8 @@ object BuildingDescriptions {
             }
         }
 
-        if (cityStrength != 0 || cityHealth != 0 || maintenance != 0) textList += FormattedLine()
-        if (cityStrength != 0) textList +=  FormattedLine("{City strength} +$cityStrength")
+        if (cityStrength != 0.0 || cityHealth != 0 || maintenance != 0) textList += FormattedLine()
+        if (cityStrength != 0.0) textList +=  FormattedLine("{City strength} +$cityStrength")
         if (cityHealth != 0) textList +=  FormattedLine("{City health} +$cityHealth")
         if (maintenance != 0) textList +=  FormattedLine("{Maintenance cost}: $maintenance {Gold}")
 

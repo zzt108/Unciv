@@ -6,7 +6,7 @@ import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.tile.Terrain
 import com.unciv.models.ruleset.tile.TerrainType
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.Unique
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.utils.debug
@@ -150,11 +150,11 @@ class NaturalWonderGenerator(val ruleset: Ruleset, val randomness: MapGeneration
                 clearTile(location, wonder.occursOn)
             }
 
-            val conversionUniques = wonder.getMatchingUniques(UniqueType.NaturalWonderConvertNeighbors, StateForConditionals.IgnoreConditionals)
+            val conversionUniques = wonder.getMatchingUniques(UniqueType.NaturalWonderConvertNeighbors, GameContext.IgnoreConditionals)
             if (conversionUniques.none()) return
 
             for (tile in location.neighbors) {
-                val state = StateForConditionals(tile = tile)
+                val state = GameContext(tile = tile)
                 for (unique in conversionUniques) {
                     if (!unique.conditionalsApply(state)) continue
                     val convertTo = unique.params[0]
@@ -217,7 +217,7 @@ class NaturalWonderGenerator(val ruleset: Ruleset, val randomness: MapGeneration
                     UniqueType.NaturalWonderLatitude -> {
                         val lower = tile.tileMap.maxLatitude * unique.getIntParam(0) * 0.01f
                         val upper = tile.tileMap.maxLatitude * unique.getIntParam(1) * 0.01f
-                        abs(tile.latitude) in lower..upper
+                        abs(tile.latitude.toFloat()) in lower..upper
                     }
 
                     else -> true
@@ -255,7 +255,7 @@ class NaturalWonderGenerator(val ruleset: Ruleset, val randomness: MapGeneration
         private fun clearTile(tile: Tile, exceptFeatures: List<String> = listOf()) {
             if (tile.terrainFeatures.isNotEmpty() && exceptFeatures != tile.terrainFeatures)
                 tile.setTerrainFeatures(tile.terrainFeatures.filter { it in exceptFeatures })
-            tile.resource = null
+            tile.tileResource = null
             tile.removeImprovement()
             tile.setTerrainTransients()
         }

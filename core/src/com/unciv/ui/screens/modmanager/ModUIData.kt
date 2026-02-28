@@ -44,8 +44,8 @@ class ModUIData private constructor(
     fun author() = ruleset?.modOptions?.author ?: repo?.owner?.login ?: ""
     fun topics() = ruleset?.modOptions?.topics ?: repo?.topics ?: emptyList()
     fun buttonText() = when {
-        ruleset != null -> ruleset.name
-        repo != null -> repo.name + (if (hasUpdate) " - {Updated}" else "")
+        ruleset != null -> ModManagementScreen.cleanModName(ruleset.name)
+        repo != null -> ModManagementScreen.cleanModName(repo.name) + (if (hasUpdate) " - {Updated}" else "")
         else -> ""
     }
 

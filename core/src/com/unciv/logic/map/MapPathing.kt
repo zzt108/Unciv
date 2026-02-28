@@ -4,6 +4,7 @@ import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
 import com.unciv.utils.Log
+import yairm210.purity.annotations.Readonly
 
 //TODO: Eventually, all path generation in the game should be moved into here.
 object MapPathing {
@@ -14,28 +15,30 @@ object MapPathing {
      * Otherwise, we set every tile to have equal value since building a road on any of them makes the original movement cost irrelevant.
      */
     @Suppress("UNUSED_PARAMETER") // While `from` is unused, this function should stay close to the signatures expected by the AStar and getPath `heuristic` parameter.
-    private fun roadPreferredMovementCost(unit: MapUnit, from: Tile, to: Tile): Float{
+    @Readonly
+    internal fun roadPreferredMovementCost(civ: Civilization, from: Tile, to: Tile): Float{
         // hasRoadConnection accounts for civs that treat jungle/forest as roads
         // Ignore road over river penalties.
-        if ((to.hasRoadConnection(unit.civ, false) || to.hasRailroadConnection(false)))
+        if ((to.hasRoadConnection(civ, false) || to.hasRailroadConnection(false)))
             return .5f
 
         return 1f
     }
 
-    fun isValidRoadPathTile(unit: MapUnit, tile: Tile): Boolean {
-        val roadImprovement = tile.ruleset.roadImprovement ?: return false
-        val railRoadImprovement = tile.ruleset.railroadImprovement ?: return false
+    @Readonly
+    fun isValidRoadPathTile(civ: Civilization, tile: Tile): Boolean {
+        val roadImprovement = tile.ruleset.roadImprovement
+        val railRoadImprovement = tile.ruleset.railroadImprovement
         
         if (tile.isWater) return false
         if (tile.isImpassible()) return false
-        if (!unit.civ.hasExplored(tile)) return false
-        if (!tile.canCivPassThrough(unit.civ)) return false
+        if (!civ.hasExplored(tile)) return false
+        if (!tile.canCivPassThrough(civ)) return false
         
-        return tile.hasRoadConnection(unit.civ, false)
+        return tile.hasRoadConnection(civ, false)
                 || tile.hasRailroadConnection(false)
-                || tile.improvementFunctions.canBuildImprovement(roadImprovement, unit.civ)
-                || tile.improvementFunctions.canBuildImprovement(railRoadImprovement, unit.civ)
+                || roadImprovement != null && tile.improvementFunctions.canBuildImprovement(roadImprovement, civ.state)
+                || railRoadImprovement != null && tile.improvementFunctions.canBuildImprovement(railRoadImprovement,civ.state)
     }
 
     /**
@@ -43,13 +46,14 @@ object MapPathing {
      *
      * This function uses the A* search algorithm to find an optimal path for road construction between two specified tiles.
      *
-     * @param unit The unit that will construct the road.
+     * @param civ The civlization that will construct the road.
      * @param startTile The starting tile of the path.
      * @param endTile The destination tile of the path.
      * @return A sequence of tiles representing the path from startTile to endTile, or null if no valid path is found.
      */
-    fun getRoadPath(unit: MapUnit, startTile: Tile, endTile: Tile): List<Tile>?{
-        return getPath(unit,
+    @Readonly
+    fun getRoadPath(civ: Civilization, startTile: Tile, endTile: Tile): List<Tile>? {
+        return getConnection(civ,
             startTile,
             endTile,
             ::isValidRoadPathTile,
@@ -72,6 +76,7 @@ object MapPathing {
      * It takes a MapUnit, a 'from' Tile, and a 'to' Tile, returning a Float value representing the heuristic cost estimate.
      * @return A list of tiles representing the path from the startTile to the endTile. Returns null if no valid path is found.
      */
+    @Readonly
     private fun getPath(unit: MapUnit,
                 startTile: Tile,
                 endTile: Tile,
@@ -103,16 +108,19 @@ object MapPathing {
      * Gets the connection to the end tile. This does not take into account tile movement costs.
      * Takes in a civilization instead of a specific unit.
      */
+    @Readonly
     fun getConnection(civ: Civilization,
         startTile: Tile,
         endTile: Tile,
-        predicate: (Civilization, Tile) -> Boolean
+        predicate: (Civilization, Tile) -> Boolean,
+        cost: (Civilization, Tile, Tile) -> Float = { _, _, _ -> 1f },
+        heuristic: (Civilization, Tile, Tile) -> Float = { _, from, to -> from.aerialDistanceTo(to).toFloat() }
     ): List<Tile>? {
         val astar = AStar(
                 startTile,
                 predicate = { tile -> predicate(civ, tile) },
-                cost = { _, _ -> 1f },
-                heuristic = { from, to -> from.aerialDistanceTo(to).toFloat() }
+                cost = { from, to -> cost(civ, from, to) },
+                heuristic = { from, to -> heuristic(civ, from, to) }
         )
         while (true) {
             if (astar.hasEnded()) {
@@ -130,4 +138,5 @@ object MapPathing {
                     .reversed()
         }
     }
+
 }

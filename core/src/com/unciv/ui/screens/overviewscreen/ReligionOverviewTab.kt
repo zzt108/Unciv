@@ -70,7 +70,7 @@ class ReligionOverviewTab(
         val minWidth = max(religionButtonLabel.prefWidth, overviewScreen.stage.width / 3)
         val manager = viewingPlayer.religionManager
         val headerText =
-            if (viewingPlayer.hideCivCount()) "Religions to be founded: [?]"
+            if (viewingPlayer.shouldHideCivCount()) "Religions to be founded: [?]"
             else "Religions to be founded: [${manager.remainingFoundableReligions()}]"
         val religionCountExpander = ExpanderTab(
             headerText, fontSize = 18, headerPad =  5f,
@@ -105,8 +105,8 @@ class ReligionOverviewTab(
         val existingReligions: List<Religion> = gameInfo.civilizations.mapNotNull { it.religionManager.religion }
         for (religion in existingReligions) {
             val image = if (religion.isPantheon()) {
-                if (viewingPlayer.knows(religion.foundingCivName) || viewingPlayer.civName == religion.foundingCivName)
-                    ImageGetter.getNationPortrait(religion.getFounder().nation, 60f)
+                if (viewingPlayer.knows(religion.foundingCiv) || viewingPlayer == religion.foundingCiv)
+                    ImageGetter.getNationPortrait(religion.foundingCiv.nation, 60f)
                 else
                     ImageGetter.getRandomNationPortrait(60f)
             } else {
@@ -153,7 +153,7 @@ class ReligionOverviewTab(
         statsTable.add(religion.getReligionDisplayName().toLabel()).right().row()
         statsTable.add("Founding Civ:".toLabel())
         val foundingCivName =
-            if (viewingPlayer.knows(religion.foundingCivName) || viewingPlayer.civName == religion.foundingCivName)
+            if (viewingPlayer.knows(religion.foundingCiv) || viewingPlayer == religion.foundingCiv)
                 religion.foundingCivName
             else Constants.unknownNationName
         statsTable.add(foundingCivName.toLabel()).right().row()
@@ -165,10 +165,10 @@ class ReligionOverviewTab(
                     if (viewingPlayer.hasExplored(holyCity.getCenterTile()))
                         holyCity.name
                     else Constants.unknownNationName
-                statsTable.add(cityName.toLabel()).right().row()
+                statsTable.add(cityName.toLabel(hideIcons = true)).right().row()
             }
         }
-        val manager = religion.getFounder().religionManager
+        val manager = religion.foundingCiv.religionManager
         statsTable.add("Cities following this religion:".toLabel())
         statsTable.add(manager.numberOfCitiesFollowingThisReligion().toLabel()).right().row()
         statsTable.add("Followers of this religion:".toLabel())

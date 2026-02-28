@@ -15,8 +15,13 @@ import com.unciv.logic.map.mapunit.UnitPromotions
 import com.unciv.logic.trade.TradeLogic
 import com.unciv.logic.trade.TradeOffer
 import com.unciv.logic.trade.TradeOfferType
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
+import com.unciv.models.ruleset.unique.UniqueTriggerActivation
 import com.unciv.models.ruleset.unique.UniqueType
+import com.unciv.ui.components.extensions.toPercent
+import com.unciv.utils.withItem
+import com.unciv.utils.withoutItem
+import yairm210.purity.annotations.Readonly
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -24,13 +29,22 @@ import kotlin.random.Random
 
 /** Helper class for containing 200 lines of "how to move cities between civs" */
 class CityConquestFunctions(val city: City) {
-    private val tileBasedRandom = Random(city.getCenterTile().position.toString().hashCode())
+    private val tileBasedRandom = Random(city.getCenterTile().position.hashCode())
 
+    @Readonly
     private fun getGoldForCapturingCity(conqueringCiv: Civilization): Int {
         val baseGold = 20 + 10 * city.population.population + tileBasedRandom.nextInt(40)
         val turnModifier = max(0, min(50, city.civ.gameInfo.turns - city.turnAcquired)) / 50f
-        val cityModifier = if (city.containsBuildingUnique(UniqueType.DoublesGoldFromCapturingCity)) 2f else 1f
-        val conqueringCivModifier = if (conqueringCiv.hasUnique(UniqueType.TripleGoldFromEncampmentsAndCities)) 3f else 1f
+        
+        var cityModifier = 1f
+        for (unique in city.getMatchingUniques(UniqueType.GoldFromCapturingCity, city.state)) {
+            cityModifier *= unique.params[0].toPercent()
+        }
+
+        var conqueringCivModifier = 1f
+        for (unique in conqueringCiv.getMatchingUniques(UniqueType.GoldFromEncampmentsAndCities, conqueringCiv.state)) {
+            conqueringCivModifier *= unique.params[0].toPercent()
+        }
 
         val goldPlundered = baseGold * turnModifier * cityModifier * conqueringCivModifier
         return goldPlundered.toInt()
@@ -49,7 +63,7 @@ class CityConquestFunctions(val city: City) {
             }
         }
     }
-    
+
     private fun removeAutoPromotion() {
         city.unitShouldUseSavedPromotion = HashMap<String, Boolean>()
         city.unitToPromotions = HashMap<String, UnitPromotions>()
@@ -96,13 +110,13 @@ class CityConquestFunctions(val city: City) {
         conqueringCiv.addNotification("Received [$goldPlundered] Gold for capturing [${city.name}]",
             city.getCenterTile().position, NotificationCategory.General, NotificationIcon.Gold)
 
-        val reconqueredCityWhileStillInResistance = city.previousOwner == receivingCiv.civName && city.isInResistance()
+        val reconqueredCityWhileStillInResistance = city.previousOwner == receivingCiv.civID && city.isInResistance()
 
         destroyBuildingsOnCapture()
 
         city.moveToCiv(receivingCiv)
 
-        Battle.destroyIfDefeated(conqueredCiv, conqueringCiv, city.location)
+        Battle.destroyIfDefeated(conqueredCiv, conqueringCiv, city.location.toHexCoord())
 
         city.health = city.getMaxHealth() / 2 // I think that cities recover to half health when conquered?
         city.avoidGrowth = false // reset settings
@@ -111,13 +125,17 @@ class CityConquestFunctions(val city: City) {
             city.population.addPopulation(-1 - city.population.population / 4) // so from 2-4 population, remove 1, from 5-8, remove 2, etc.
         city.reassignAllPopulation()
 
-        if (!reconqueredCityWhileStillInResistance && city.foundingCiv != receivingCiv.civName) {
+        if (!reconqueredCityWhileStillInResistance && city.foundingCivObject != receivingCiv) {
             // add resistance
             // I checked, and even if you puppet there's resistance for conquering
             city.setFlag(CityFlags.Resistance, city.population.population)
         } else {
             // reconquering or liberating city in resistance so eliminate it
             city.removeFlag(CityFlags.Resistance)
+        }
+
+        for (unique in conqueredCiv.getTriggeredUniques(UniqueType.TriggerUponLosingCity, GameContext(civInfo = conqueredCiv))) {
+            UniqueTriggerActivation.triggerUnique(unique, civInfo = conqueredCiv)
         }
     }
 
@@ -131,14 +149,14 @@ class CityConquestFunctions(val city: City) {
         diplomaticRepercussionsForConqueringCity(oldCiv, conqueringCiv)
 
         conquerCity(conqueringCiv, oldCiv, conqueringCiv)
-
-        city.isPuppet = true
+        makePuppet()
         city.cityStats.update()
+    }
+    
+    private fun makePuppet(){
+        city.isPuppet = true
         // The city could be producing something that puppets shouldn't, like units
-        city.cityConstructions.currentConstructionIsUserSet = false
-        city.cityConstructions.inProgressConstructions.clear() // undo all progress of the previous civ on units etc.
-        city.cityConstructions.constructionQueue.clear()
-        city.cityConstructions.chooseNextConstruction()
+        city.cityConstructions.removeAll()
     }
 
     fun annexCity() {
@@ -175,17 +193,28 @@ class CityConquestFunctions(val city: City) {
     }
 
     fun liberateCity(conqueringCiv: Civilization) {
-        if (city.foundingCiv == "") { // this should never happen but just in case...
+        if (city.foundingCivObject == null) { // this should never happen but just in case...
             this.puppetCity(conqueringCiv)
             this.annexCity()
             return
         }
 
-        val foundingCiv = city.civ.gameInfo.getCivilization(city.foundingCiv)
-        if (foundingCiv.isDefeated()) // resurrected civ
-            for (diploManager in foundingCiv.diplomacy.values)
+        val foundingCiv = city.foundingCivObject!!
+        if (foundingCiv.isDefeated()) { // resurrected civ
+            for (diploManager in foundingCiv.diplomacy.values) {
                 if (diploManager.diplomaticStatus == DiplomaticStatus.War)
                     diploManager.makePeace()
+
+                // Clear all diplomatic flags and modifiers to prevent asymmetry after resurrection
+                // The defeated civ's flags were frozen while other civs' flags continued to expire
+                // Perhaps some of this needs more dedicated treatment but it's a pretty rare case anyway
+                //   so I think starting from scratch is a good way to go 
+                diploManager.flagsCountdown.clear()
+                diploManager.otherCivDiplomacy().flagsCountdown.clear()
+                diploManager.diplomaticModifiers.clear()
+                diploManager.otherCivDiplomacy().diplomaticModifiers.clear()
+            }
+        }
 
         val oldCiv = city.civ
 
@@ -203,9 +232,9 @@ class CityConquestFunctions(val city: City) {
                     civ.knows(conqueringCiv) && civ.knows(foundingCiv) ->
                         civ.addNotification("[$conqueringCiv] has liberated [$foundingCiv]", NotificationCategory.Diplomacy, foundingCiv.civName, NotificationIcon.Diplomacy, conqueringCiv.civName)
                     civ.knows(conqueringCiv) && !civ.knows(foundingCiv) ->
-                        civ.addNotification("[$conqueringCiv] has liberated an unknown civilization", NotificationCategory.Diplomacy, NotificationIcon.Diplomacy, conqueringCiv.civName)
+                        civ.addNotification("[$conqueringCiv] has liberated [an unknown civilization]", NotificationCategory.Diplomacy, NotificationIcon.Diplomacy, conqueringCiv.civName)
                     !civ.knows(conqueringCiv) && civ.knows(foundingCiv) ->
-                        civ.addNotification("An unknown civilization has liberated [$foundingCiv]", NotificationCategory.Diplomacy, NotificationIcon.Diplomacy, foundingCiv.civName)
+                        civ.addNotification("[An unknown civilization] has liberated [$foundingCiv]", NotificationCategory.Diplomacy, NotificationIcon.Diplomacy, foundingCiv.civName)
                     else -> continue
                 }
             }
@@ -224,7 +253,7 @@ class CityConquestFunctions(val city: City) {
 
 
     private fun diplomaticRepercussionsForLiberatingCity(conqueringCiv: Civilization, conqueredCiv: Civilization) {
-        val foundingCiv = conqueredCiv.gameInfo.civilizations.first { it.civName == city.foundingCiv }
+        val foundingCiv = city.foundingCivObject!!
         val percentageOfCivPopulationInThatCity = city.population.population *
                 100f / (foundingCiv.cities.sumOf { it.population.population } + city.population.population)
         val respectForLiberatingOurCity = 10f + percentageOfCivPopulationInThatCity.roundToInt()
@@ -262,13 +291,13 @@ class CityConquestFunctions(val city: City) {
         //  civs so the capitalCityIndicator recognizes the unique buildings of the conquered civ
         if (city.isCapital()) oldCiv.moveCapitalToNextLargest(city)
 
-        oldCiv.cities = oldCiv.cities.toMutableList().apply { remove(city) }
-        newCiv.cities = newCiv.cities.toMutableList().apply { add(city) }
+        oldCiv.cities = oldCiv.cities.withoutItem(city)
+        newCiv.cities = newCiv.cities.withItem(city)
         city.civ = newCiv
-        city.state = StateForConditionals(city)
+        city.state = GameContext(city)
         city.hasJustBeenConquered = false
         city.turnAcquired = city.civ.gameInfo.turns
-        city.previousOwner = oldCiv.civName
+        city.previousOwner = oldCiv.civID
 
         // now that the tiles have changed, we need to reassign population
         for (workedTile in city.workedTiles.filterNot { city.tiles.contains(it) }) {
@@ -281,13 +310,13 @@ class CityConquestFunctions(val city: City) {
 
         // Remove their free buildings from this city and remove free buildings provided by the city from their cities
         removeBuildingsOnMoveToCiv()
-        
-        // Remove auto promotion from city that is being moved 
+
+        // Remove auto promotion from city that is being moved
         removeAutoPromotion()
 
         // catch-all - should ideally not happen as we catch the individual cases with an appropriate notification
-        city.espionage.removeAllPresentSpies(SpyFleeReason.Other) 
-        
+        city.espionage.removeAllPresentSpies(SpyFleeReason.Other)
+
 
         // Place palace for newCiv if this is the only city they have.
         if (newCiv.cities.size == 1) newCiv.moveCapitalTo(city, null)
@@ -308,12 +337,7 @@ class CityConquestFunctions(val city: City) {
 
         if (city.civ.gameInfo.isReligionEnabled()) city.religion.removeUnknownPantheons()
 
-        if (newCiv.hasUnique(UniqueType.MayNotAnnexCities)) {
-            city.isPuppet = true
-            city.cityConstructions.currentConstructionIsUserSet = false
-            city.cityConstructions.constructionQueue.clear()
-            city.cityConstructions.chooseNextConstruction()
-        }
+        if (newCiv.hasUnique(UniqueType.MayNotAnnexCities)) makePuppet()
 
         city.tryUpdateRoadStatus()
         city.cityStats.update()

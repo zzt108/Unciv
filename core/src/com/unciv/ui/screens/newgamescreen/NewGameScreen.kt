@@ -2,7 +2,7 @@ package com.unciv.ui.screens.newgamescreen
 
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.graphics.Color
-import com.badlogic.gdx.scenes.scene2d.ui.VerticalGroup
+import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup
 import com.unciv.Constants
 import com.unciv.UncivGame
 import com.unciv.logic.GameInfo
@@ -40,10 +40,10 @@ import com.unciv.ui.screens.basescreen.RecreateOnResize
 import com.unciv.ui.screens.pickerscreens.PickerScreen
 import com.unciv.utils.Concurrency
 import com.unciv.utils.Log
+import com.unciv.utils.isUUID
 import com.unciv.utils.launchOnGLThread
 import kotlinx.coroutines.coroutineScope
-import java.net.URL
-import java.util.UUID
+import java.net.URI
 import kotlin.math.floor
 import com.unciv.ui.components.widgets.AutoScrollPane as ScrollPane
 
@@ -87,27 +87,33 @@ class NewGameScreen(
 
         if (isPortrait) initPortrait()
         else initLandscape()
-
         bottomTable.background = skinStrings.getUiBackground("NewGameScreen/BottomTable", tintColor = skinStrings.skinConfig.clearColor)
         topTable.background = skinStrings.getUiBackground("NewGameScreen/TopTable", tintColor = skinStrings.skinConfig.clearColor)
 
+        val horizontalGroup = HorizontalGroup().padBottom(5f).space(10f)
+        rightSideGroup.addActorAt(0, horizontalGroup)
+
         if (UncivGame.Current.settings.lastGameSetup != null) {
-            rightSideGroup.addActorAt(0, VerticalGroup().padBottom(5f))
             val resetToDefaultsButton = "Reset to defaults".toTextButton()
-            rightSideGroup.addActorAt(0, resetToDefaultsButton)
             resetToDefaultsButton.onClick {
                 ConfirmPopup(
                     this,
                     "Are you sure you want to reset all game options to defaults?",
                     "Reset to defaults",
                 ) {
-                    game.replaceCurrentScreen(NewGameScreen(GameSetupInfo()))
+                    val gameSetupInfo = GameSetupInfo().apply {
+                        gameParameters.espionageEnabled = true
+                    }
+                    game.replaceCurrentScreen(NewGameScreen(gameSetupInfo))
                 }.open(true)
             }
+            horizontalGroup.addActor(resetToDefaultsButton)
         }
 
-        rightSideButton.setText("Start game!".tr())
-        rightSideButton.onClick(this::startGameAvoidANRs)
+        val startGameButton = "Start game!".toTextButton().apply { color = Color.GREEN }        
+        startGameButton.onClick(this::startGameAvoidANRs)
+        horizontalGroup.addActor(startGameButton)
+        pickerPane.rightSideButton.remove()
     }
 
     private fun startGameAvoidANRs(){
@@ -156,15 +162,13 @@ class NewGameScreen(
                     else "Couldn't connect to Dropbox!"
 
             for (player in gameSetupInfo.gameParameters.players.filter { it.playerType == PlayerType.Human }) {
-                try {
-                    UUID.fromString(IdChecker.checkAndReturnPlayerUuid(player.playerId))
-                } catch (_: Exception) {
+                if (!(IdChecker.checkAndReturnPlayerUuid(player.playerId)?.isUUID() ?: false)) {
                     return "Invalid player ID!"
                 }
             }
 
             if (!gameSetupInfo.gameParameters.anyoneCanSpectate) {
-                if (gameSetupInfo.gameParameters.players.none { it.playerId == UncivGame.Current.settings.multiplayer.userId })
+                if (gameSetupInfo.gameParameters.players.none { it.playerId == UncivGame.Current.settings.multiplayer.getUserId() })
                     return "You are not allowed to spectate!"
             }
         }
@@ -193,9 +197,9 @@ class NewGameScreen(
             val message = mapSize.fixUndesiredSizes(gameSetupInfo.mapParameters.worldWrap)
             if (message != null) {
                 with (mapOptionsTable.generatedMapOptionsTable) {
-                    customMapSizeRadius.text = mapSize.radius.tr()
-                    customMapWidth.text = mapSize.width.tr()
-                    customMapHeight.text = mapSize.height.tr()
+                    customMapSizeRadius.intValue = mapSize.radius
+                    customMapWidth.intValue = mapSize.width
+                    customMapHeight.intValue = mapSize.height
                 }
                 return message
             }
@@ -267,8 +271,8 @@ class NewGameScreen(
 
     private fun checkConnectionToMultiplayerServer(): Boolean {
         return try {
-            val multiplayerServer = UncivGame.Current.settings.multiplayer.server
-            val u =  URL(if (Multiplayer.usesDropbox()) "https://content.dropboxapi.com" else multiplayerServer)
+            val multiplayerServer = UncivGame.Current.settings.multiplayer.getServer()
+            val u = URI(if (Multiplayer.usesDropbox()) "https://content.dropboxapi.com" else multiplayerServer).toURL()
             val con = u.openConnection()
             con.connectTimeout = 3000
             con.connect()

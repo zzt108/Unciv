@@ -3,22 +3,13 @@ package com.unciv.logic.civilization.managers
 import com.unciv.Constants
 import com.unciv.logic.IsPartOfGameInfoSerialization
 import com.unciv.logic.city.City
-import com.unciv.logic.civilization.AlertType
-import com.unciv.logic.civilization.Civilization
-import com.unciv.logic.civilization.LocationAction
-import com.unciv.logic.civilization.MayaLongCountAction
-import com.unciv.logic.civilization.NotificationCategory
-import com.unciv.logic.civilization.NotificationIcon
-import com.unciv.logic.civilization.PlayerType
-import com.unciv.logic.civilization.PolicyAction
-import com.unciv.logic.civilization.PopupAlert
-import com.unciv.logic.civilization.TechAction
+import com.unciv.logic.civilization.*
 import com.unciv.logic.map.tile.RoadStatus
 import com.unciv.models.ruleset.INonPerpetualConstruction
 import com.unciv.models.ruleset.tech.Era
 import com.unciv.models.ruleset.tech.Technology
 import com.unciv.models.ruleset.tile.TileResource
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueMap
 import com.unciv.models.ruleset.unique.UniqueTriggerActivation
 import com.unciv.models.ruleset.unique.UniqueType
@@ -28,6 +19,7 @@ import com.unciv.ui.components.MayaCalendar
 import com.unciv.ui.components.extensions.toPercent
 import com.unciv.ui.components.fonts.Fonts
 import com.unciv.utils.withItem
+import yairm210.purity.annotations.Readonly
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -67,7 +59,7 @@ class TechManager : IsPartOfGameInfoSerialization {
     var repeatingTechsResearched = 0
 
     /** For calculating Great Scientist yields - see https://civilization.fandom.com/wiki/Great_Scientist_(Civ5)  */
-    var scienceOfLast8Turns = IntArray(8) { 0 }
+    var scienceOfLast8Turns = IntArray(8)
     var scienceFromResearchAgreements = 0
     /** This is the list of strings, which is serialized */
     var techsResearched = HashSet<String>()
@@ -95,10 +87,11 @@ class TechManager : IsPartOfGameInfoSerialization {
         return toReturn
     }
 
-    fun getNumberOfTechsResearched(): Int = techsResearched.size
+    @Readonly fun getNumberOfTechsResearched(): Int = techsResearched.size
 
-    fun getOverflowScience(): Int = overflowScience
+    @Readonly fun getOverflowScience(): Int = overflowScience
 
+    @Readonly
     private fun getScienceModifier(techName: String): Float { // https://forums.civfanatics.com/threads/the-mechanics-of-overflow-inflation.517970/
         val numberOfCivsResearchedThisTech = civInfo.getKnownCivs()
             .count { it.isMajorCiv() && it.tech.isResearched(techName) }
@@ -107,8 +100,9 @@ class TechManager : IsPartOfGameInfoSerialization {
         return 1 + numberOfCivsResearchedThisTech / numberOfCivsRemaining.toFloat() * 0.3f
     }
 
-    private fun getRuleset() = civInfo.gameInfo.ruleset
+    @Readonly private fun getRuleset() = civInfo.gameInfo.ruleset
 
+    @Readonly
     fun costOfTech(techName: String): Int {
         var techCost = getRuleset().technologies[techName]!!.cost.toFloat()
         if (civInfo.isHuman())
@@ -124,23 +118,27 @@ class TechManager : IsPartOfGameInfoSerialization {
         return techCost.toInt()
     }
 
+    @Readonly
     fun currentTechnology(): Technology? {
         val currentTechnologyName = currentTechnologyName() ?: return null
         return getRuleset().technologies[currentTechnologyName]
     }
 
+    @Readonly
     fun currentTechnologyName(): String? {
         return if (techsToResearch.isEmpty()) null else techsToResearch[0]
     }
 
-    fun researchOfTech(techName: String?) = techsInProgress[techName] ?: 0
+    @Readonly fun researchOfTech(techName: String?) = techsInProgress[techName] ?: 0
     // Was once duplicated as fun scienceSpentOnTech(tech: String): Int
 
+    @Readonly
     fun remainingScienceToTech(techName: String): Int {
         val spareScience = if (canBeResearched(techName)) getOverflowScience() else 0
         return costOfTech(techName) - researchOfTech(techName) - spareScience
     }
 
+    @Readonly
     fun turnsToTech(techName: String): String {
         val remainingCost = remainingScienceToTech(techName).toDouble()
         return when {
@@ -152,26 +150,28 @@ class TechManager : IsPartOfGameInfoSerialization {
             ).tr()
         }
     }
-
-    fun isResearched(techName: String): Boolean = techsResearched.contains(techName)
-
-    fun isResearched(construction: INonPerpetualConstruction): Boolean = construction.requiredTechs().all{ requiredTech -> isResearched(requiredTech) }
+    
+    @Readonly fun isResearched(techName: String): Boolean = techsResearched.contains(techName)
+    @Readonly fun isResearched(construction: INonPerpetualConstruction): Boolean = construction.requiredTechs().all{ requiredTech -> isResearched(requiredTech) }
 
     /** resources which need no research count as researched */
+    @Readonly
     fun isRevealed(resource: TileResource): Boolean {
         val revealedBy = resource.revealedBy ?: return true
         return isResearched(revealedBy)
     }
-    
-    fun isObsolete(unit: BaseUnit): Boolean = unit.techsThatObsoleteThis().any{ obsoleteTech -> isResearched(obsoleteTech) }
 
+    @Readonly fun isObsolete(unit: BaseUnit): Boolean = unit.techsThatObsoleteThis().any { obsoleteTech -> isResearched(obsoleteTech) }
+
+    @Readonly
     fun isUnresearchable(tech: Technology): Boolean {
-        if (tech.getMatchingUniques(UniqueType.OnlyAvailable, StateForConditionals.IgnoreConditionals).any { !it.conditionalsApply(civInfo.state) })
+        if (tech.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals).any { !it.conditionalsApply(civInfo.state) })
             return true
         if (tech.hasUnique(UniqueType.Unavailable, civInfo.state)) return true
         return false
     }
 
+    @Readonly
     fun canBeResearched(techName: String): Boolean {
         val tech = getRuleset().technologies[techName]!!
 
@@ -181,7 +181,7 @@ class TechManager : IsPartOfGameInfoSerialization {
         return tech.prerequisites.all { isResearched(it) }
     }
 
-    fun allTechsAreResearched() = allTechsAreResearched
+    @Readonly fun allTechsAreResearched() = allTechsAreResearched
 
     //endregion
 
@@ -209,6 +209,7 @@ class TechManager : IsPartOfGameInfoSerialization {
         return prerequisites.sortedBy { it.column!!.columnNumber }
     }
 
+    @Readonly
     fun getScienceFromGreatScientist(): Int {
         // https://civilization.fandom.com/wiki/Great_Scientist_(Civ5)
         return (scienceOfLast8Turns.sum() * civInfo.gameInfo.speed.scienceCostModifier).toInt()
@@ -218,6 +219,7 @@ class TechManager : IsPartOfGameInfoSerialization {
         scienceOfLast8Turns[civInfo.gameInfo.turns % 8] = science
     }
 
+    @Readonly
     private fun limitOverflowScience(overflowScience: Int): Int {
         // http://www.civclub.net/bbs/forum.php?mod=viewthread&tid=123976
         // Apparently yes, we care about the absolute tech cost, not the actual calculated-for-this-player tech cost,
@@ -226,6 +228,7 @@ class TechManager : IsPartOfGameInfoSerialization {
                 getRuleset().technologies[currentTechnologyName()]!!.cost))
     }
 
+    @Readonly
     private fun scienceFromResearchAgreements(): Int {
         // https://forums.civfanatics.com/resources/research-agreements-bnw.25568/
         var researchAgreementModifier = 0.5f
@@ -280,8 +283,7 @@ class TechManager : IsPartOfGameInfoSerialization {
         val scienceSpent = researchOfTech(currentTechnology) + realOverflow
         if (scienceSpent >= costOfTech(currentTechnology)) {
             overflowScience = 0
-            if (realOverflow != 0)
-                addScience(realOverflow)
+            addScience(realOverflow)
         }
     }
 
@@ -313,9 +315,13 @@ class TechManager : IsPartOfGameInfoSerialization {
             civInfo.popupAlerts.add(PopupAlert(AlertType.TechResearched, techName))
 
         val triggerNotificationText = "due to researching [$techName]"
-        for (unique in newTech.uniqueObjects)
-            if (!unique.hasTriggerConditional() && unique.conditionalsApply(civInfo.state))
+        for (unique in newTech.uniqueObjects) {
+            if (!unique.isTriggerable || unique.hasTriggerConditional() || !unique.conditionalsApply(civInfo.state))
+                continue
+            repeat(unique.getUniqueMultiplier(civInfo.state)) {
                 UniqueTriggerActivation.triggerUnique(unique, civInfo, triggerNotificationText = triggerNotificationText)
+            }
+        }
 
         for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponResearch) { newTech.matchesFilter(it.params[0], civInfo.state) })
             UniqueTriggerActivation.triggerUnique(unique, civInfo, triggerNotificationText = triggerNotificationText)
@@ -324,7 +330,7 @@ class TechManager : IsPartOfGameInfoSerialization {
         val revealedResources = getRuleset().tileResources.values.filter { techName == it.revealedBy }
         if (civInfo.playerType == PlayerType.Human) {
             for (revealedResource in revealedResources) {
-                civInfo.gameInfo.notifyExploredResources(civInfo, revealedResource.name, 5)
+                civInfo.gameInfo.notifyExploredResources(civInfo, revealedResource, 5)
             }
         }
 
@@ -351,7 +357,8 @@ class TechManager : IsPartOfGameInfoSerialization {
     }
 
     /** A variant of kotlin's [associateBy] that omits null values */
-    private inline fun <T, K, V> Iterable<T>.associateByNotNull(keySelector: (T) -> K, valueTransform: (T) -> V?): Map<K, V> {
+    @Readonly
+    private inline fun <T, K, V> Iterable<T>.associateByNotNull(@Readonly keySelector: (T) -> K, @Readonly valueTransform: (T) -> V?): Map<K, V> {
         val destination = LinkedHashMap<K, V>()
         for (element in this) {
             val value = valueTransform(element) ?: continue
@@ -362,6 +369,7 @@ class TechManager : IsPartOfGameInfoSerialization {
 
     private fun obsoleteOldUnits(techName: String) {
         // First build a map with obsoleted units to their (nation-specific) upgrade
+        @Readonly 
         fun BaseUnit.getEquivalentUpgradeOrNull(techName: String): BaseUnit? {
             val unitUpgradesTo = automaticallyUpgradedInProductionToUnitByTech(techName)
                 ?: return null
@@ -380,13 +388,7 @@ class TechManager : IsPartOfGameInfoSerialization {
             return obsoleteUnits[old]?.name  // Replacement, or pass through null to remove from queue
         }
         for (city in civInfo.cities) {
-            // Replace queue - the sequence iteration and finalization happens before the result
-            // is reassigned, therefore no concurrent modification worries
-            city.cityConstructions.constructionQueue =
-                city.cityConstructions.constructionQueue
-                .asSequence()
-                .mapNotNull { transformConstruction(it, city) }
-                .toMutableList()
+            city.cityConstructions.transformQueue(::transformConstruction)
         }
 
         // Add notifications for obsolete units/constructions
@@ -400,7 +402,7 @@ class TechManager : IsPartOfGameInfoSerialization {
             for(city in cities)
                 city.cityConstructions.validateInProgressConstructions()
 
-            val locationAction = LocationAction(cities.asSequence().map { it.location })
+            val locationAction = LocationAction(cities.asSequence().map { it.location.toHexCoord() })
             val cityText = if (cities.size == 1) "[${cities.first().name}]"
                 else "[${cities.size}] cities"
             val newUnit = obsoleteUnits[unit]?.name
@@ -453,24 +455,18 @@ class TechManager : IsPartOfGameInfoSerialization {
             .filter { it.eraNumber > previousEra.eraNumber && it.eraNumber <= currentEra.eraNumber }
             .sortedBy { it.eraNumber }
 
-        for (era in erasPassed)
-            for (unique in era.uniqueObjects)
-                if (!unique.hasTriggerConditional() && unique.conditionalsApply(civInfo.state))
-                    UniqueTriggerActivation.triggerUnique(
-                        unique,
-                        civInfo,
-                        triggerNotificationText = "due to entering the [${era.name}]"
-                    )
-
-        val eraNames = erasPassed.map { it.name }.toHashSet()
-        for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponEnteringEra))
-            for (eraName in eraNames)
-                if (unique.getModifiers(UniqueType.TriggerUponEnteringEra).any { it.params[0] == eraName })
-                    UniqueTriggerActivation.triggerUnique(
-                        unique,
-                        civInfo,
-                        triggerNotificationText = "due to entering the [$eraName]"
-                    )
+        for (era in erasPassed) {
+            for (unique in era.uniqueObjects) {
+                if (unique.hasTriggerConditional() || !unique.conditionalsApply(civInfo.state)) continue
+                repeat(unique.getUniqueMultiplier(civInfo.state)) {
+                    UniqueTriggerActivation.triggerUnique(unique, civInfo, triggerNotificationText = "due to entering the [${era.name}]")
+                }
+            }
+            
+            for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponEnteringEra) { it.params[0] == era.name }) {
+                UniqueTriggerActivation.triggerUnique(unique, civInfo, triggerNotificationText = "due to entering the [${era.name}]")
+            }
+        }
 
         // The unfiltered version
         for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponEnteringEraUnfiltered))
@@ -536,19 +532,20 @@ class TechManager : IsPartOfGameInfoSerialization {
             .all { isResearched(it.name) || !canBeResearched(it.name)}
     }
 
+    @Readonly
     fun getBestRoadAvailable(): RoadStatus {
         val railroadImprovement = getRuleset().railroadImprovement  // May not exist in mods
-        if (railroadImprovement != null && (railroadImprovement.techRequired == null || isResearched(railroadImprovement.techRequired!!)))
+        if (railroadImprovement != null && (railroadImprovement.techRequired == null || isResearched(railroadImprovement.techRequired!!))
+            && ImprovementFunctions.getImprovementBuildingProblems(railroadImprovement, civInfo.state).none())
             return RoadStatus.Railroad
 
         val roadImprovement = getRuleset().roadImprovement
-        if (roadImprovement != null && (roadImprovement.techRequired == null || isResearched(roadImprovement.techRequired!!)))
+        if (roadImprovement != null && (roadImprovement.techRequired == null || isResearched(roadImprovement.techRequired!!))
+            && ImprovementFunctions.getImprovementBuildingProblems(roadImprovement, civInfo.state).none())
             return RoadStatus.Road
 
         return RoadStatus.None
     }
 
-    fun canResearchTech(): Boolean {
-        return getRuleset().technologies.values.any { canBeResearched(it.name) }
-    }
+    @Readonly fun canResearchTech(): Boolean = getRuleset().technologies.values.any { canBeResearched(it.name) }
 }

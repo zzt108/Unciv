@@ -1,5 +1,7 @@
 package com.unciv.models.ruleset.unique
 
+import yairm210.purity.annotations.Readonly
+
 /**
  * Expresses which RulesetObject types a UniqueType is applicable to.
  *
@@ -54,39 +56,77 @@ enum class UniqueTarget(
     Ruins(inheritsFrom = UnitTriggerable),
 
     // Other
-    Speed,
+    GlobalUniques(inheritsFrom = Global),
+    Speed("Speed uniques will be treated as part of GlobalUniques for the Speed selected in a game", inheritsFrom = GlobalUniques),
+    Difficulty("Difficulty uniques will be treated as part of GlobalUniques for the Difficulty selected in a game", inheritsFrom = GlobalUniques),
     Tutorial,
     CityState(inheritsFrom = Global),
     ModOptions,
     Event,
-    EventChoice(inheritsFrom = Triggerable),
+    EventChoice(inheritsFrom = UnitTriggerable),
 
     // Modifiers
-    Conditional("Modifiers that can be added to other uniques to limit when they will be active", modifierType = ModifierType.Conditional),
-    TriggerCondition("Special conditionals that can be added to Triggerable uniques, to make them activate upon specific actions.", inheritsFrom = Global, modifierType = ModifierType.Other),
-    UnitTriggerCondition("Special conditionals that can be added to UnitTriggerable uniques, to make them activate upon specific actions.", inheritsFrom = TriggerCondition, modifierType = ModifierType.Other),
-    UnitActionModifier("Modifiers that can be added to UnitAction uniques as conditionals", modifierType = ModifierType.Other),
-    MetaModifier("Modifiers that can be added to other uniques changing user experience, not their behavior", modifierType = ModifierType.Other),
+    Conditional("Modifiers that can be added to other uniques to limit when they will be active",
+        modifierType = ModifierType.Conditional,
+    ),
+    
+    TriggerCondition("Special conditionals that can be added to Triggerable uniques, to make them activate upon specific actions.",
+        modifierType = ModifierType.Other
+    ){
+        override fun isAcceptableModifierFor(unique: Unique): Boolean = unique.isTriggerable
+    },
+    
+    UnitTriggerCondition("Special conditionals that can be added to UnitTriggerable uniques, to make them activate upon specific actions.",
+        modifierType = ModifierType.Other){
+
+        override fun isAcceptableModifierFor(unique: Unique): Boolean {
+            val targetTypes = unique.type?.targetTypes ?: return false
+            
+            // This is a triggerable of any kind that's on a unit - this can be also a timed triggerable
+            if (unique.isTriggerable && unique.sourceObjectType?.canAcceptUniqueTarget(Unit) == true ) return true
+            // Also needs to accept triggerables
+            return targetTypes.any { UnitTriggerable.canAcceptUniqueTarget(it) }
+        }
+    },
+    
+    UnitActionModifier("Modifiers that can be added to UnitAction uniques as conditionals",    
+        modifierType = ModifierType.Other){
+        override fun isAcceptableModifierFor(unique: Unique): Boolean {
+            val targetTypes = unique.type?.targetTypes ?: return false
+            // Also needs to accept triggerables
+            return targetTypes.any { UnitAction.canAcceptUniqueTarget(it) }
+        }
+    },
+    MetaModifier("Modifiers that can be added to other uniques changing user experience, not their behavior", 
+        modifierType = ModifierType.Other),
     ;
 
     /** Whether a UniqueType is allowed in the `<conditional or trigger>` part - or not.
      *  [None] ensures use *only* as leading Unique, [Conditional] / [Other] disallow use as leading Unique. */
     enum class ModifierType { None, Conditional, Other }
 
-    /** Checks whether a specific UniqueTarget `this` as e.g. given by [IHasUniques.getUniqueTarget] works with [uniqueTarget] as e.g. declared in UniqueType */
-    // Building.canAcceptUniqueTarget(Global) == true
-    // Global.canAcceptUniqueTarget(Building) == false
+    /** Checks whether a specific UniqueTarget `this` as e.g. given by [IHasUniques.getUniqueTarget] 
+     * works with [uniqueTarget] as e.g. declared in UniqueType
+     * Building.canAcceptUniqueTarget(Global) == true
+     * Global.canAcceptUniqueTarget(Building) == false
+     */
+    @Readonly
     fun canAcceptUniqueTarget(uniqueTarget: UniqueTarget): Boolean {
         if (this == uniqueTarget) return true
         if (inheritsFrom != null) return inheritsFrom.canAcceptUniqueTarget(uniqueTarget)
         return false
     }
+    
+    @Readonly
+    open fun isAcceptableModifierFor(unique: Unique): Boolean = true
+    
     companion object {
         /** All targets that can display their Uniques */
         // As Array so it can used in a vararg parameter list.
         val Displayable = arrayOf(
             Building, Unit, UnitType, Improvement, Tech, FollowerBelief, FounderBelief,
-            Terrain, Resource, Policy, Promotion, Nation, Ruins, Speed, EventChoice
+            Terrain, Resource, Policy, Promotion, Nation, Ruins, Speed, EventChoice,
+            Difficulty
         )
         val CanIncludeSuppression = arrayOf(
             Triggerable,    // Includes Global and covers most IHasUnique's

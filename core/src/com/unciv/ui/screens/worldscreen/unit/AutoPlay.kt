@@ -4,6 +4,7 @@ import com.unciv.models.metadata.GameSettings
 import com.unciv.ui.screens.worldscreen.WorldScreen
 import com.unciv.utils.Concurrency
 import kotlinx.coroutines.Job
+import yairm210.purity.annotations.Readonly
 
 class AutoPlay(private var autoPlaySettings: GameSettings.GameSettingsAutoPlay) {
     /**
@@ -61,13 +62,13 @@ class AutoPlay(private var autoPlaySettings: GameSettings.GameSettingsAutoPlay) 
         }
     }
 
-    fun isAutoPlaying(): Boolean = turnsToAutoPlay > 0 || autoPlayTurnInProgress
+    @Readonly fun isAutoPlaying(): Boolean = turnsToAutoPlay > 0 || autoPlayTurnInProgress
 
-    fun isAutoPlayingAndFullAutoPlayAI(): Boolean = isAutoPlaying() && autoPlaySettings.fullAutoPlayAI
+    @Readonly fun isAutoPlayingAndFullAutoPlayAI(): Boolean = isAutoPlaying() && autoPlaySettings.fullAutoPlayAI
 
     /**
      * @return true if we should play at least 1 more turn and we are not currenlty processing any AutoPlay
      */
-    fun shouldContinueAutoPlaying(): Boolean = !autoPlayTurnInProgress && turnsToAutoPlay > 0
+    @Readonly fun shouldContinueAutoPlaying(): Boolean = !autoPlayTurnInProgress && turnsToAutoPlay > 0
 }
 

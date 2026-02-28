@@ -3,7 +3,6 @@ package com.unciv.ui.screens.worldscreen
 import com.badlogic.gdx.Application
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.Input
-import com.badlogic.gdx.math.Vector2
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
 import com.unciv.Constants
@@ -14,6 +13,7 @@ import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.PlayerType
 import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
 import com.unciv.logic.event.EventBus
+import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.MapVisualization
 import com.unciv.logic.multiplayer.MultiplayerGameUpdated
 import com.unciv.logic.multiplayer.storage.FileStorageRateLimitReached
@@ -50,14 +50,15 @@ import com.unciv.ui.screens.savescreens.SaveGameScreen
 import com.unciv.ui.screens.victoryscreen.VictoryScreen
 import com.unciv.ui.screens.worldscreen.bottombar.BattleTable
 import com.unciv.ui.screens.worldscreen.bottombar.TileInfoTable
+import com.unciv.ui.screens.worldscreen.chat.ChatButton
 import com.unciv.ui.screens.worldscreen.mainmenu.WorldScreenMusicPopup
 import com.unciv.ui.screens.worldscreen.minimap.MinimapHolder
 import com.unciv.ui.screens.worldscreen.status.AutoPlayStatusButton
 import com.unciv.ui.screens.worldscreen.status.MultiplayerStatusButton
 import com.unciv.ui.screens.worldscreen.status.NextTurnButton
 import com.unciv.ui.screens.worldscreen.status.NextTurnProgress
-import com.unciv.ui.screens.worldscreen.status.StatusButtons
 import com.unciv.ui.screens.worldscreen.status.SmallUnitButton
+import com.unciv.ui.screens.worldscreen.status.StatusButtons
 import com.unciv.ui.screens.worldscreen.topbar.WorldScreenTopBar
 import com.unciv.ui.screens.worldscreen.unit.AutoPlay
 import com.unciv.ui.screens.worldscreen.unit.UnitTable
@@ -69,8 +70,10 @@ import com.unciv.utils.debug
 import com.unciv.utils.launchOnGLThread
 import com.unciv.utils.launchOnThreadPool
 import com.unciv.utils.withGLContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import yairm210.purity.annotations.Readonly
 import java.util.Timer
 import kotlin.concurrent.timer
 
@@ -112,6 +115,7 @@ class WorldScreen(
     // Floating Widgets going counter-clockwise
     internal val topBar = WorldScreenTopBar(this)
     internal val techPolicyAndDiplomacy = TechPolicyDiplomacyButtons(this)
+    internal val chatButton = ChatButton(this)
     private val unitActionsTable = UnitActionsTable(this)
     /** Bottom left widget holding information about a selected unit or city */
     internal val bottomUnitTable = UnitTable(this)
@@ -157,6 +161,7 @@ class WorldScreen(
         stage.addActor(topBar)
         stage.addActor(statusButtons)
         stage.addActor(techPolicyAndDiplomacy)
+        stage.addActor(chatButton)
 
         stage.addActor(zoomController)
         zoomController.isVisible = UncivGame.Current.settings.showZoomButtons
@@ -169,21 +174,18 @@ class WorldScreen(
         battleTable.x = stage.width / 3
         stage.addActor(battleTable)
 
-        val tileToCenterOn: Vector2 =
+        val tileToCenterOn: HexCoord =
                 when {
-                    viewingCiv.getCapital() != null -> viewingCiv.getCapital()!!.location
+                    viewingCiv.getCapital() != null -> viewingCiv.getCapital()!!.location.toHexCoord()
                     viewingCiv.units.getCivUnits().any() -> viewingCiv.units.getCivUnits().first().getTile().position
-                    else -> Vector2.Zero
+                    else -> HexCoord.Zero
                 }
 
         mapHolder.isAutoScrollEnabled = Gdx.app.type == Application.ApplicationType.Desktop && game.settings.mapAutoScroll
         mapHolder.mapPanningSpeed = game.settings.mapPanningSpeed
 
         // Don't select unit and change selectedCiv when centering as spectator
-        if (viewingCiv.isSpectator())
-            mapHolder.setCenterPosition(tileToCenterOn, immediately = true, selectUnit = false)
-        else
-            mapHolder.setCenterPosition(tileToCenterOn, immediately = true, selectUnit = true)
+        mapHolder.setCenterPosition(tileToCenterOn, immediately = true, selectUnit = !viewingCiv.isSpectator())
 
         tutorialController.allTutorialsShowedCallback = { shouldUpdate = true }
 
@@ -235,8 +237,8 @@ class WorldScreen(
         }
     }
 
-    fun openEmpireOverview(category: EmpireOverviewCategories? = null) {
-        game.pushScreen(EmpireOverviewScreen(selectedCiv, category))
+    fun openEmpireOverview(category: EmpireOverviewCategories? = null, selection: String = "") {
+        game.pushScreen(EmpireOverviewScreen(selectedCiv, category, selection))
     }
 
     fun openNewGameScreen() {
@@ -269,7 +271,7 @@ class WorldScreen(
         globalShortcuts.add(KeyboardBinding.QuickLoad) { QuickSave.load(this) }
         globalShortcuts.add(KeyboardBinding.ViewCapitalCity) {
             val capital = gameInfo.getCurrentPlayerCivilization().getCapital()
-            if (capital != null && !mapHolder.setCenterPosition(capital.location))
+            if (capital != null && !mapHolder.setCenterPosition(capital.location.toHexCoord()))
                 game.pushScreen(CityScreen(capital))
         }
         globalShortcuts.add(KeyboardBinding.Options) { // Game Options
@@ -285,17 +287,19 @@ class WorldScreen(
         globalShortcuts.add(Input.Keys.NUMPAD_ADD) { this.mapHolder.zoomIn() }    //   '+' Zoom
         globalShortcuts.add(Input.Keys.NUMPAD_SUBTRACT) { this.mapHolder.zoomOut() }    //   '-' Zoom
         globalShortcuts.add(KeyboardBinding.ToggleUI) { toggleUI() }
-        globalShortcuts.add(KeyboardBinding.ToggleResourceDisplay) { minimapWrapper.resourceImageButton.toggle() }
         globalShortcuts.add(KeyboardBinding.ToggleYieldDisplay) { minimapWrapper.yieldImageButton.toggle() }
         globalShortcuts.add(KeyboardBinding.ToggleWorkedTilesDisplay) { minimapWrapper.populationImageButton.toggle() }
         globalShortcuts.add(KeyboardBinding.ToggleMovementDisplay) { minimapWrapper.movementsImageButton.toggle() }
+        globalShortcuts.add(KeyboardBinding.ToggleResourceDisplay) { minimapWrapper.resourceImageButton.toggle() }
+        globalShortcuts.add(KeyboardBinding.ToggleImprovementDisplay) { minimapWrapper.improvementsImageButton.toggle() }
 
         globalShortcuts.add(KeyboardBinding.DeveloperConsole, action = ::openDeveloperConsole)
     }
 
+    @Readonly
     fun openDeveloperConsole() {
-        // No cheating unless you're by yourself
-        if (gameInfo.civilizations.count { it.isHuman() } > 1) return
+        // No cheating unless you're by yourself, ignoring a possible spectator
+        if (gameInfo.civilizations.count { it.isHuman() && !it.isSpectator() } > 1) return
         DevConsolePopup(this)
     }
 
@@ -335,7 +339,7 @@ class WorldScreen(
             val latestGame = game.onlineMultiplayer.multiplayerServer.downloadGame(gameInfo.gameId)
             debug("loadLatestMultiplayerState downloaded game: gameId: %s, turn: %s, curCiv: %s",
                 latestGame.gameId, latestGame.turns, latestGame.currentPlayer)
-            if (viewingCiv.civName == latestGame.currentPlayer || viewingCiv.civName == Constants.spectator) {
+            if (viewingCiv.civID == latestGame.currentPlayer || viewingCiv.civID == Constants.spectator) {
                 game.notifyTurnStarted()
             }
             launchOnGLThread {
@@ -388,7 +392,7 @@ class WorldScreen(
         mapHolder.resetArrows()
         if (UncivGame.Current.settings.showUnitMovements) {
             val allUnits = gameInfo.civilizations.asSequence().flatMap { it.units.getCivUnits() }
-            val allAttacks = allUnits.map { unit -> unit.attacksSinceTurnStart.asSequence().map { attacked -> Triple(unit.civ, unit.getTile().position, attacked) } }.flatten() +
+            val allAttacks = allUnits.map { unit -> unit.attacksSinceTurnStart.asSequence().map { attacked -> Triple(unit.civ, unit.getTile().position, attacked.toHexCoord()) } }.flatten() +
                 gameInfo.civilizations.asSequence().flatMap { civInfo -> civInfo.attacksSinceTurnStart.asSequence().map { Triple(civInfo, it.source, it.target) } }
             mapHolder.updateMovementOverlay(
                 allUnits.filter(mapVisualization::isUnitPastVisible),
@@ -478,7 +482,7 @@ class WorldScreen(
         displayTutorial(TutorialTrigger.EnemyCityNeedsConqueringWithMeleeUnit) {
             viewingCiv.diplomacy.values.asSequence()
                     .filter { it.diplomaticStatus == DiplomaticStatus.War }
-                    .map { it.otherCiv() } // we're now lazily enumerating over CivilizationInfo's we're at war with
+                    .map { it.otherCiv } // we're now lazily enumerating over CivilizationInfo's we're at war with
                     .flatMap { it.cities.asSequence() } // ... all *their* cities
                     .filter { it.health == 1 } // ... those ripe for conquering
                     .flatMap { it.getCenterTile().getTilesInDistance(2) }
@@ -551,14 +555,16 @@ class WorldScreen(
         val scrollX = mapHolder.scrollX
         val scrollY = mapHolder.scrollY
     }
+    
+    @Readonly
     fun getRestoreState(): RestoreState {
-        return RestoreState(mapHolder, selectedCiv.civName, viewingCiv.civName, fogOfWar)
+        return RestoreState(mapHolder, selectedCiv.civID, viewingCiv.civID, fogOfWar)
     }
 
     private fun restore(restoreState: RestoreState) {
 
         // This is not the case if you have a multiplayer game where you play as 2 civs
-        if (viewingCiv.civName == restoreState.viewingCivName) {
+        if (viewingCiv.civID == restoreState.viewingCivName) {
             mapHolder.zoom(restoreState.zoom)
             mapHolder.scrollX = restoreState.scrollX
             mapHolder.scrollY = restoreState.scrollY
@@ -585,20 +591,37 @@ class WorldScreen(
 
             progressBar.increment()
 
-            gameInfoClone.nextTurn(progressBar)
+            gameInfoClone.nextTurn(progressBar, true)
 
             if (originalGameInfo.gameParameters.isOnlineMultiplayer) {
+                // outer try-catch for non-auth exceptions
                 try {
-                    game.onlineMultiplayer.updateGame(gameInfoClone)
-                }catch (ex: Exception) {
-                    when (ex) {
-                        is MultiplayerAuthException -> {
+                    // keep retrying if upload fails AND reauthentication succeeds
+                    var retryUpload: Boolean
+                    do {
+                        try {
+                            game.onlineMultiplayer.updateGame(gameInfoClone)
+                            // upload succeeded
+                            retryUpload = false
+                        } catch (_: MultiplayerAuthException) {
+                            // true only if authentication succeeds (the popup permits retries)
+                            // false only if user closes the auth popup or the popup init crashes
+                            val authResult = CompletableDeferred<Boolean>()
                             launchOnGLThread {
-                                AuthPopup(this@WorldScreen) {
-                                        success -> if (success) nextTurn()
-                                }.open(true)
+                                try {
+                                    AuthPopup(this@WorldScreen, authResult::complete).open(true)
+                                } catch (ex: Exception) {
+                                    // GL thread crashed during AuthPopup init, let's wrap up
+                                    authResult.complete(false)
+                                    // ensure exception is passed to crash handler
+                                    throw ex
+                                }
                             }
+                            retryUpload = authResult.await()
                         }
+                    } while (retryUpload)
+                } catch (ex: Exception) { // non-auth exceptions
+                    when (ex) {
                         is FileStorageRateLimitReached -> {
                             val message = "Server limit reached! Please wait for [${ex.limitRemainingSeconds}] seconds"
                             launchOnGLThread {
@@ -609,7 +632,7 @@ class WorldScreen(
                             }
                         }
                         else -> {
-                            val message = "Could not upload game!"
+                            val message = "Could not upload game! Reason: [${ex.message ?: "Unknown"}]"
                             launchOnGLThread {
                                 val cantUploadNewGamePopup = Popup(this@WorldScreen)
                                 cantUploadNewGamePopup.addGoodSizedLabel(message).row()
@@ -664,7 +687,8 @@ class WorldScreen(
         }
         shouldUpdate = true
     }
-
+    
+    @Readonly
     internal fun isNextTurnUpdateRunning(): Boolean {
         val job = nextTurnUpdateJob
         return job != null && job.isActive
@@ -682,6 +706,9 @@ class WorldScreen(
             statusButtons.update(true)
         }
         statusButtons.setPosition(stage.width - statusButtons.width - 10f, topBar.y - statusButtons.height - 10f)
+
+        // Update chat button position to always be below techPolicyAndDiplomacy
+        chatButton.updatePosition()
     }
 
     private fun updateAutoPlayStatusButton() {
@@ -739,7 +766,7 @@ class WorldScreen(
 
 
     private fun showTutorialsOnNextTurn() {
-        if (!game.settings.showTutorials) return
+        if (!game.settings.showTutorials || autoPlay.isAutoPlaying()) return
         displayTutorial(TutorialTrigger.SlowStart)
         displayTutorial(TutorialTrigger.CityExpansion) { viewingCiv.cities.any { it.expansion.tilesClaimed() > 0 } }
         displayTutorial(TutorialTrigger.BarbarianEncountered) { viewingCiv.viewableTiles.any { it.getUnits().any { unit -> unit.civ.isBarbarian } } }
@@ -756,8 +783,6 @@ class WorldScreen(
             viewingCiv.getKnownCivs().filter { viewingCiv.isAtWarWith(it) }
                     .flatMap { it.cities.asSequence() }.any { viewingCiv.hasExplored(it.getCenterTile()) }
         }
-        displayTutorial(TutorialTrigger.ApolloProgram) { viewingCiv.hasUnique(UniqueType.EnablesConstructionOfSpaceshipParts) }
-        displayTutorial(TutorialTrigger.SiegeUnits) { viewingCiv.units.getCivUnits().any { it.baseUnit.isProbablySiegeUnit() } }
         displayTutorial(TutorialTrigger.Embarking) { viewingCiv.hasUnique(UniqueType.LandUnitEmbarkation) }
         displayTutorial(TutorialTrigger.NaturalWonders) { viewingCiv.naturalWonders.size > 0 }
         displayTutorial(TutorialTrigger.WeLoveTheKingDay) { viewingCiv.cities.any { it.demandedResource != "" } }

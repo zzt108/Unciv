@@ -3,6 +3,9 @@ package com.unciv.models
 import com.badlogic.gdx.utils.Json
 import com.badlogic.gdx.utils.JsonValue
 import com.unciv.logic.IsPartOfGameInfoSerialization
+import yairm210.purity.annotations.InternalState
+import yairm210.purity.annotations.LocalState
+import yairm210.purity.annotations.Readonly
 
 /**
  *  Implements a specialized Map storing on-zero Integers.
@@ -12,6 +15,7 @@ import com.unciv.logic.IsPartOfGameInfoSerialization
  *  - Therefore, Deserialization works properly ***only*** with [K] === String.
  *    (ignoring this will return a deserialized map, but the keys will violate the compile-time type and BE strings)
  */
+@InternalState
 open class Counter<K>(
     fromMap: Map<K, Int>? = null
 ) : LinkedHashMap<K, Int>(fromMap?.size ?: 10), IsPartOfGameInfoSerialization, Json.Serializable {
@@ -47,17 +51,24 @@ open class Counter<K>(
     }
     operator fun minusAssign(other: Counter<K>) = remove(other)
 
+    @Readonly
+    /** Creates a new instance (does not modify) */
     operator fun times(amount: Int): Counter<K> {
         val newCounter = Counter<K>()
         for (key in keys) newCounter[key] = this[key] * amount
         return newCounter
     }
 
-    operator fun plus(other: Counter<K>) = clone().apply { add(other) }
+    @Readonly 
+    operator fun plus(other: Counter<K>): Counter<K> {
+        @LocalState val clone = clone()
+        clone.add(other)
+        return clone
+    }
 
-    fun sumValues() = values.sum()
+    @Readonly fun sumValues() = values.sum()
 
-    override fun clone() = Counter(this)
+    @Readonly override fun clone() = Counter(this)
 
     companion object {
         val ZERO: Counter<String> = object : Counter<String>() {

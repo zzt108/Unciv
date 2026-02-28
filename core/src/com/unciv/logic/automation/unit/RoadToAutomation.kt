@@ -1,16 +1,18 @@
 package com.unciv.logic.automation.unit
 
-import com.badlogic.gdx.math.Vector2
+import com.unciv.UncivGame
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.MapUnitAction
 import com.unciv.logic.civilization.NotificationCategory
 import com.unciv.logic.civilization.NotificationIcon
+import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.MapPathing
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.RoadStatus
 import com.unciv.logic.map.tile.Tile
 import com.unciv.utils.Log
 import com.unciv.utils.debug
+import yairm210.purity.annotations.Readonly
 
 
 /** Responsible for automation the "build road to" action
@@ -47,11 +49,13 @@ class RoadToAutomation(val civInfo: Civilization) {
 
         val destinationTile = unit.civ.gameInfo.tileMap[unit.automatedRoadConnectionDestination!!]
 
-        var pathToDest: List<Vector2>? = unit.automatedRoadConnectionPath
+        var pathToDest: List<HexCoord>? = unit.automatedRoadConnectionPath
 
         // The path does not exist, create it
         if (pathToDest == null) {
-            val foundPath: List<Tile>? = MapPathing.getRoadPath(unit, currentTile, destinationTile)
+            val foundPath: List<Tile>? = 
+                if (UncivGame.Current.settings.useAStarPathfinding) unit.movement.getRoadPath(destinationTile)
+                else MapPathing.getRoadPath(unit.civ, unit.getTile(), destinationTile)
             if (foundPath == null) {
                 Log.debug("WorkerAutomation: $unit -> connect road failed")
                 stopAndCleanAutomation(unit)
@@ -140,6 +144,7 @@ class RoadToAutomation(val civInfo: Civilization) {
 
 
     /** Conditions for whether it is acceptable to build a road on this tile */
+    @Readonly
     fun shouldBuildRoadOnTile(tile: Tile): Boolean {
         if (tile.roadIsPillaged) return true
         return !tile.isCityCenter() // Can't build road on city tiles

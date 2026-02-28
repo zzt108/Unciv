@@ -1,10 +1,12 @@
 package com.unciv.models.ruleset
 
+import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.files.FileHandle
 import com.unciv.Constants
 import com.unciv.json.fromJsonFile
 import com.unciv.json.json
 import com.unciv.logic.BackwardCompatibility.updateDeprecations
+import com.unciv.logic.GameInfo
 import com.unciv.logic.map.tile.RoadStatus
 import com.unciv.models.metadata.BaseRuleset
 import com.unciv.models.ruleset.nation.CityStateType
@@ -17,11 +19,12 @@ import com.unciv.models.ruleset.tech.Technology
 import com.unciv.models.ruleset.tile.Terrain
 import com.unciv.models.ruleset.tile.TileImprovement
 import com.unciv.models.ruleset.tile.TileResource
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.Unique
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.BaseUnit
 import com.unciv.models.ruleset.unit.Promotion
+import com.unciv.models.ruleset.unit.UnitNameGroup
 import com.unciv.models.ruleset.unit.UnitType
 import com.unciv.models.ruleset.validation.RulesetValidator
 import com.unciv.models.ruleset.validation.UniqueValidator
@@ -32,33 +35,36 @@ import com.unciv.models.stats.SubStat
 import com.unciv.models.translations.tr
 import com.unciv.ui.screens.civilopediascreen.ICivilopediaText
 import com.unciv.utils.Log
+import org.jetbrains.annotations.VisibleForTesting
+import yairm210.purity.annotations.Readonly
 import kotlin.collections.set
 
-enum class RulesetFile(val filename: String,
-                       val getRulesetObjects:Ruleset.() -> Sequence<IRulesetObject> = { emptySequence() },
-                       val getUniques: Ruleset.() -> Sequence<Unique> = {getRulesetObjects().flatMap { it.uniqueObjects }}){
-    Beliefs("Beliefs.json", {beliefs.values.asSequence()}),
-    Buildings("Buildings.json", { buildings.values.asSequence()}),
+enum class RulesetFile(
+    val filename: String,
+    @Readonly val getRulesetObjects: Ruleset.() -> Sequence<IRulesetObject> = { emptySequence() },
+    @Readonly val getUniques: Ruleset.() -> Sequence<Unique> = { getRulesetObjects().flatMap { it.uniqueObjects } }
+) {
+    Beliefs("Beliefs.json", { beliefs.values.asSequence() }),
+    Buildings("Buildings.json", { buildings.values.asSequence() }),
     Eras("Eras.json", { eras.values.asSequence() }),
     Religions("Religions.json"),
     Nations("Nations.json", { nations.values.asSequence() }),
     Policies("Policies.json", { policies.values.asSequence() }),
     Techs("Techs.json", { technologies.values.asSequence() }),
     Terrains("Terrains.json", { terrains.values.asSequence() }),
-    /** Tutorials are special and are read in [com.unciv.ui.screens.basescreen.TutorialController.loadTutorialsFromJson]
-     * This is here for completion's sake and to remove ruleset validation error */
-    Tutorials("Tutorials.json"),
+    Tutorials("Tutorials.json", { tutorials.values.asSequence() }),
     TileImprovements("TileImprovements.json", { tileImprovements.values.asSequence() }),
     TileResources("TileResources.json", { tileResources.values.asSequence() }),
     Specialists("Specialists.json"),
-    Units("Units.json", { units.values.asSequence()}),
+    Units("Units.json", { units.values.asSequence() }),
     UnitPromotions("UnitPromotions.json", { unitPromotions.values.asSequence() }),
+    UnitNameGroup("UnitNameGroups.json", { unitNameGroups.values.asSequence() }),
     UnitTypes("UnitTypes.json", { unitTypes.values.asSequence() }),
     VictoryTypes("VictoryTypes.json"),
     CityStateTypes("CityStateTypes.json", getUniques =
         { cityStateTypes.values.asSequence().flatMap { it.allyBonusUniqueMap.getAllUniques() + it.friendBonusUniqueMap.getAllUniques() } }),
     Personalities("Personalities.json", { personalities.values.asSequence() }),
-    Events("Events.json", {events.values.asSequence() + events.values.flatMap { it.choices }}),
+    Events("Events.json", { events.values.asSequence() + events.values.flatMap { it.choices } }),
     GlobalUniques("GlobalUniques.json", { sequenceOf(globalUniques) }),
     ModOptions("ModOptions.json", getUniques = { modOptions.uniqueObjects.asSequence() }),
     Speeds("Speeds.json", { speeds.values.asSequence() }),
@@ -94,7 +100,9 @@ class Ruleset {
     val difficulties = LinkedHashMap<String, Difficulty>()
     val eras = LinkedHashMap<String, Era>()
     val speeds = LinkedHashMap<String, Speed>()
-    var globalUniques = GlobalUniques()
+    /** Only [Ruleset.load], [GameInfo], [BaseUnit] and [RulesetValidator] should access this directly.
+     *  All other uses should call [GameInfo.getGlobalUniques] instead. */
+    internal var globalUniques = GlobalUniques()
     val nations = LinkedHashMap<String, Nation>()
     val policies = LinkedHashMap<String, Policy>()
     val policyBranches = LinkedHashMap<String, PolicyBranch>()
@@ -107,8 +115,10 @@ class Ruleset {
     val terrains = LinkedHashMap<String, Terrain>()
     val tileImprovements = LinkedHashMap<String, TileImprovement>()
     val tileResources = LinkedHashMap<String, TileResource>()
+    val tutorials = LinkedHashMap<String, Tutorial>()
     val units = LinkedHashMap<String, BaseUnit>()
     val unitPromotions = LinkedHashMap<String, Promotion>()
+    val unitNameGroups = LinkedHashMap<String, UnitNameGroup>()
     val unitTypes = LinkedHashMap<String, UnitType>()
     var victories = LinkedHashMap<String, Victory>()
     var cityStateTypes = LinkedHashMap<String, CityStateType>()
@@ -119,7 +129,7 @@ class Ruleset {
 
     //region cache fields
     val greatGeneralUnits by lazy {
-        units.values.filter { it.hasUnique(UniqueType.GreatPersonFromCombat, StateForConditionals.IgnoreConditionals) }
+        units.values.filter { it.hasUnique(UniqueType.GreatPersonFromCombat, GameContext.IgnoreConditionals) }
     }
 
     val tileRemovals by lazy { tileImprovements.values.filter { it.name.startsWith(Constants.remove) } }
@@ -131,8 +141,12 @@ class Ruleset {
         sequence {
             for (unique in this@Ruleset.allUniques())
                 for (conditional in unique.modifiers){
-                    if (conditional.type == UniqueType.ConditionalBelowHappiness) yield(conditional.params[0].toInt())
-                    if (conditional.type == UniqueType.ConditionalBetweenHappiness){
+                    if (conditional.type == UniqueType.ConditionalWhenBelowAmountStatResource
+                        && conditional.params[1] == "Happiness") yield(conditional.params[0].toInt())
+                    if (conditional.type == UniqueType.ConditionalWhenAboveAmountStatResource
+                        && conditional.params[1] == "Happiness") yield(conditional.params[0].toInt())
+                    if (conditional.type == UniqueType.ConditionalWhenBetweenStatResource
+                        && conditional.params[2] == "Happiness"){
                         yield(conditional.params[0].toInt())
                         yield(conditional.params[1].toInt() + 1)
                     }
@@ -141,13 +155,16 @@ class Ruleset {
         }.toSet()
     }
 
-    val roadImprovement by lazy { RoadStatus.Road.improvement(this) }
-    val railroadImprovement by lazy { RoadStatus.Railroad.improvement(this) }
+    val roadImprovement: TileImprovement? by lazy { RoadStatus.Road.improvement(this) }
+    val railroadImprovement: TileImprovement? by lazy { RoadStatus.Railroad.improvement(this) }
     //endregion
 
     fun clone(): Ruleset {
         val newRuleset = Ruleset()
         newRuleset.add(this)
+        // Make sure the clone is recognizable - e.g. startNewGame fallback when a base mod was removed needs this
+        newRuleset.name = name
+        newRuleset.modOptions.isBaseRuleset = modOptions.isBaseRuleset
         return newRuleset
     }
 
@@ -159,7 +176,7 @@ class Ruleset {
         val hashMap = LinkedHashMap<String, T>(items.size)
         for (item in items) {
             val itemName = try { item.name }
-            catch (ex: Exception) {
+            catch (_: Exception) {
                 throw Exception("${T::class.simpleName} is missing a name!")
             }
 
@@ -171,6 +188,13 @@ class Ruleset {
 
     fun add(ruleset: Ruleset) {
         beliefs.putAll(ruleset.beliefs)
+        ruleset.modOptions.beliefsToRemove
+            .flatMap { beliefsToRemove ->
+                beliefs.filter { it.value.matchesFilter(beliefsToRemove) }.keys
+            }.toSet().forEach {
+                beliefs.remove(it)
+            }
+
         ruleset.modOptions.buildingsToRemove
             .flatMap { buildingToRemove ->
                 buildings.filter { it.value.matchesFilter(buildingToRemove) }.keys
@@ -181,12 +205,7 @@ class Ruleset {
         difficulties.putAll(ruleset.difficulties)
         eras.putAll(ruleset.eras)
         speeds.putAll(ruleset.speeds)
-        globalUniques = GlobalUniques().apply {
-            uniques.addAll(globalUniques.uniques)
-            uniques.addAll(ruleset.globalUniques.uniques)
-            unitUniques.addAll(globalUniques.unitUniques)
-            unitUniques.addAll(ruleset.globalUniques.unitUniques)
-        }
+        globalUniques = GlobalUniques.combine(globalUniques, ruleset.globalUniques)
         ruleset.modOptions.nationsToRemove
             .flatMap { nationToRemove ->
                 nations.filter { it.value.matchesFilter(nationToRemove) }.keys
@@ -194,10 +213,53 @@ class Ruleset {
                 nations.remove(it)
             }
         nations.putAll(ruleset.nations)
+        
+        /** We must remove all policies from a policy branch otherwise we have policies that cannot be picked
+         *  but are still considered "available" */
+        fun removePolicyBranch(policyBranch: PolicyBranch){
+            policyBranches.remove(policyBranch.name)
+            for (policy in policyBranch.policies)
+                policies.remove(policy.name)
+        }
+        
+        ruleset.modOptions.policyBranchesToRemove
+            .flatMap { policyBranchToRemove ->
+                policyBranches.filter { it.value.matchesFilter(policyBranchToRemove) }.values
+            }.toSet().forEach {
+                removePolicyBranch(it)
+            }
+        
+        val overriddenPolicyBranches = policyBranches
+            .filter { it.key in ruleset.policyBranches }.map { it.value }
+        for (policyBranch in overriddenPolicyBranches) removePolicyBranch(policyBranch
+        )
         policyBranches.putAll(ruleset.policyBranches)
+        
         policies.putAll(ruleset.policies)
+
+        // Remove the policies
+        ruleset.modOptions.policiesToRemove
+            .flatMap { policyToRemove ->
+                policies.filter { it.value.matchesFilter(policyToRemove) }.keys
+            }.toSet().forEach {
+                policies.remove(it)
+            }
+
+        // Remove the policies if they exist in the policy branches too
+        for (policyToRemove in ruleset.modOptions.policiesToRemove) {
+            for (branch in policyBranches.values) {
+                branch.policies.removeAll { it.matchesFilter(policyToRemove) }
+            }
+        }
+
         quests.putAll(ruleset.quests)
+
+        // Remove associated Religions, including when they're favored by Nations
         religions.addAll(ruleset.religions)
+        religions.removeAll(ruleset.modOptions.religionsToRemove)
+        nations.filter { it.value.favoredReligion in ruleset.modOptions.religionsToRemove }
+            .forEach { it.value.favoredReligion = null }
+
         ruinRewards.putAll(ruleset.ruinRewards)
         specialists.putAll(ruleset.specialists)
         ruleset.modOptions.techsToRemove
@@ -211,6 +273,7 @@ class Ruleset {
         terrains.putAll(ruleset.terrains)
         tileImprovements.putAll(ruleset.tileImprovements)
         tileResources.putAll(ruleset.tileResources)
+        tutorials.putAll(ruleset.tutorials)
         unitTypes.putAll(ruleset.unitTypes)
         victories.putAll(ruleset.victories)
         cityStateTypes.putAll(ruleset.cityStateTypes)
@@ -227,6 +290,7 @@ class Ruleset {
         modOptions.constants.merge(ruleset.modOptions.constants)
 
         unitPromotions.putAll(ruleset.unitPromotions)
+        unitNameGroups.putAll(ruleset.unitNameGroups)
 
         mods += ruleset.mods
     }
@@ -251,7 +315,9 @@ class Ruleset {
         terrains.clear()
         tileImprovements.clear()
         tileResources.clear()
+        tutorials.clear()
         unitPromotions.clear()
+        unitNameGroups.clear()
         units.clear()
         unitTypes.clear()
         victories.clear()
@@ -260,14 +326,18 @@ class Ruleset {
         events.clear()
     }
 
+    @Readonly
     fun allRulesetObjects(): Sequence<IRulesetObject> = RulesetFile.entries.asSequence().flatMap { it.getRulesetObjects(this) }
+    @Readonly
     fun allUniques(): Sequence<Unique> = RulesetFile.entries.asSequence().flatMap { it.getUniques(this) }
-    fun allICivilopediaText(): Sequence<ICivilopediaText> = allRulesetObjects() + events.values.flatMap { it.choices }
+    @Readonly fun allICivilopediaText(): Sequence<ICivilopediaText> = allRulesetObjects() + events.values.flatMap { it.choices }
 
     fun load(folderHandle: FileHandle) {
+        fun RulesetFile.file() = folderHandle.child(filename)
+
         // Note: Most files are loaded using createHashmap, which sets originRuleset automatically.
         // For other files containing IRulesetObject's we'll have to remember to do so manually - e.g. Tech.
-        val modOptionsFile = folderHandle.child("ModOptions.json")
+        val modOptionsFile = RulesetFile.ModOptions.file()
         if (modOptionsFile.exists()) {
             try {
                 modOptions = json().fromJsonFile(ModOptions::class.java, modOptionsFile)
@@ -277,7 +347,7 @@ class Ruleset {
             }
         }
 
-        val techFile = folderHandle.child("Techs.json")
+        val techFile = RulesetFile.Techs.file()
         if (techFile.exists()) {
             val techColumns = json().fromJsonFile(Array<TechColumn>::class.java, techFile)
             for (techColumn in techColumns) {
@@ -291,10 +361,10 @@ class Ruleset {
             }
         }
 
-        val buildingsFile = folderHandle.child("Buildings.json")
+        val buildingsFile = RulesetFile.Buildings.file()
         if (buildingsFile.exists()) buildings += createHashmap(json().fromJsonFile(Array<Building>::class.java, buildingsFile))
 
-        val terrainsFile = folderHandle.child("Terrains.json")
+        val terrainsFile = RulesetFile.Terrains.file()
         if (terrainsFile.exists()) {
             terrains += createHashmap(json().fromJsonFile(Array<Terrain>::class.java, terrainsFile))
             for (terrain in terrains.values) {
@@ -303,40 +373,43 @@ class Ruleset {
             }
         }
 
-        val resourcesFile = folderHandle.child("TileResources.json")
+        val resourcesFile = RulesetFile.TileResources.file()
         if (resourcesFile.exists()) tileResources += createHashmap(json().fromJsonFile(Array<TileResource>::class.java, resourcesFile))
 
-        val improvementsFile = folderHandle.child("TileImprovements.json")
+        val improvementsFile = RulesetFile.TileImprovements.file()
         if (improvementsFile.exists()) tileImprovements += createHashmap(json().fromJsonFile(Array<TileImprovement>::class.java, improvementsFile))
 
-        val erasFile = folderHandle.child("Eras.json")
+        val erasFile = RulesetFile.Eras.file()
         if (erasFile.exists()) eras += createHashmap(json().fromJsonFile(Array<Era>::class.java, erasFile))
         // While `eras.values.toList()` might seem more logical, eras.values is a MutableCollection and
         // therefore does not guarantee keeping the order of elements like a LinkedHashMap does.
         // Using map{} sidesteps this problem
         eras.map { it.value }.withIndex().forEach { it.value.eraNumber = it.index }
 
-        val speedsFile = folderHandle.child("Speeds.json")
+        val speedsFile = RulesetFile.Speeds.file()
         if (speedsFile.exists()) {
             speeds += createHashmap(json().fromJsonFile(Array<Speed>::class.java, speedsFile))
         }
 
-        val unitTypesFile = folderHandle.child("UnitTypes.json")
+        val unitTypesFile = RulesetFile.UnitTypes.file()
         if (unitTypesFile.exists()) unitTypes += createHashmap(json().fromJsonFile(Array<UnitType>::class.java, unitTypesFile))
 
-        val unitsFile = folderHandle.child("Units.json")
+        val unitsFile = RulesetFile.Units.file()
         if (unitsFile.exists()) units += createHashmap(json().fromJsonFile(Array<BaseUnit>::class.java, unitsFile))
 
-        val promotionsFile = folderHandle.child("UnitPromotions.json")
+        val promotionsFile = RulesetFile.UnitPromotions.file()
         if (promotionsFile.exists()) unitPromotions += createHashmap(json().fromJsonFile(Array<Promotion>::class.java, promotionsFile))
 
-        val questsFile = folderHandle.child("Quests.json")
+        val unitNameGroupsFile = RulesetFile.UnitNameGroup.file()
+        if (unitNameGroupsFile.exists()) unitNameGroups += createHashmap(json().fromJsonFile(Array<UnitNameGroup>::class.java, unitNameGroupsFile))
+
+        val questsFile = RulesetFile.Quests.file()
         if (questsFile.exists()) quests += createHashmap(json().fromJsonFile(Array<Quest>::class.java, questsFile))
 
-        val specialistsFile = folderHandle.child("Specialists.json")
+        val specialistsFile = RulesetFile.Specialists.file()
         if (specialistsFile.exists()) specialists += createHashmap(json().fromJsonFile(Array<Specialist>::class.java, specialistsFile))
 
-        val policiesFile = folderHandle.child("Policies.json")
+        val policiesFile = RulesetFile.Policies.file()
         if (policiesFile.exists()) {
             policyBranches += createHashmap(
                 json().fromJsonFile(Array<PolicyBranch>::class.java, policiesFile)
@@ -381,77 +454,89 @@ class Ruleset {
             }
         }
 
-        val beliefsFile = folderHandle.child("Beliefs.json")
+        val beliefsFile = RulesetFile.Beliefs.file()
         if (beliefsFile.exists())
             beliefs += createHashmap(json().fromJsonFile(Array<Belief>::class.java, beliefsFile))
 
-        val religionsFile = folderHandle.child("Religions.json")
+        val religionsFile = RulesetFile.Religions.file()
         if (religionsFile.exists())
             religions += json().fromJsonFile(Array<String>::class.java, religionsFile).toList()
 
-        val ruinRewardsFile = folderHandle.child("Ruins.json")
+        val ruinRewardsFile = RulesetFile.Ruins.file()
         if (ruinRewardsFile.exists())
             ruinRewards += createHashmap(json().fromJsonFile(Array<RuinReward>::class.java, ruinRewardsFile))
 
-        val nationsFile = folderHandle.child("Nations.json")
+        val nationsFile = RulesetFile.Nations.file()
         if (nationsFile.exists()) {
             nations += createHashmap(json().fromJsonFile(Array<Nation>::class.java, nationsFile))
             for (nation in nations.values) nation.setTransients()
         }
 
-        val difficultiesFile = folderHandle.child("Difficulties.json")
+        val difficultiesFile = RulesetFile.Difficulties.file()
         if (difficultiesFile.exists())
             difficulties += createHashmap(json().fromJsonFile(Array<Difficulty>::class.java, difficultiesFile))
 
-        val globalUniquesFile = folderHandle.child("GlobalUniques.json")
+        val globalUniquesFile = RulesetFile.GlobalUniques.file()
         if (globalUniquesFile.exists()) {
             globalUniques = json().fromJsonFile(GlobalUniques::class.java, globalUniquesFile)
             globalUniques.originRuleset = name
         }
 
-        val victoryTypesFile = folderHandle.child("VictoryTypes.json")
+        val victoryTypesFile = RulesetFile.VictoryTypes.file()
         if (victoryTypesFile.exists()) {
             victories += createHashmap(json().fromJsonFile(Array<Victory>::class.java, victoryTypesFile))
         }
 
-        val cityStateTypesFile = folderHandle.child("CityStateTypes.json")
+        val cityStateTypesFile = RulesetFile.CityStateTypes.file()
         if (cityStateTypesFile.exists()) {
             cityStateTypes += createHashmap(json().fromJsonFile(Array<CityStateType>::class.java, cityStateTypesFile))
         }
 
-        val personalitiesFile = folderHandle.child("Personalities.json")
+        val personalitiesFile = RulesetFile.Personalities.file()
         if (personalitiesFile.exists()) {
             personalities += createHashmap(json().fromJsonFile(Array<Personality>::class.java, personalitiesFile))
         }
 
-        val eventsFile = folderHandle.child("Events.json")
+        val eventsFile = RulesetFile.Events.file()
         if (eventsFile.exists()) {
             events += createHashmap(json().fromJsonFile(Array<Event>::class.java, eventsFile))
         }
 
-
+        // Tutorials exist per builtin ruleset or mod, but there's also a global file that's always loaded
+        // Note we can't rely on UncivGame.Current here, so we do the same thing getBuiltinRulesetFileHandle in RulesetCache does
+        if (Gdx.files != null) { // we're not running console mode
+            val globalTutorialsFile = Gdx.files.internal("jsons").child(RulesetFile.Tutorials.filename)
+            if (globalTutorialsFile.exists())
+                tutorials += createHashmap(json().fromJsonFile(Array<Tutorial>::class.java, globalTutorialsFile))
+        }
+        
+        val tutorialsFile = RulesetFile.Tutorials.file()
+        if (tutorialsFile.exists())
+            tutorials += createHashmap(json().fromJsonFile(Array<Tutorial>::class.java, tutorialsFile))
 
         // Add objects that might not be present in base ruleset mods, but are required
         if (modOptions.isBaseRuleset) {
+            val fallbackRuleset by lazy { RulesetCache.getVanillaRuleset() } // clone at most once
             // This one should be temporary
             if (unitTypes.isEmpty()) {
-                unitTypes.putAll(RulesetCache.getVanillaRuleset().unitTypes)
+                unitTypes.putAll(fallbackRuleset.unitTypes)
             }
 
             // These should be permanent
-            if (ruinRewards.isEmpty())
-                ruinRewards.putAll(RulesetCache.getVanillaRuleset().ruinRewards)
+            if (!ruinRewardsFile.exists())
+                ruinRewards.putAll(fallbackRuleset.ruinRewards)
 
-            if (globalUniques.uniques.isEmpty()) {
-                globalUniques = RulesetCache.getVanillaRuleset().globalUniques
+            if (!globalUniquesFile.exists()) {
+                globalUniques = fallbackRuleset.globalUniques
             }
             // If we have no victories, add all the default victories
-            if (victories.isEmpty()) victories.putAll(RulesetCache.getVanillaRuleset().victories)
+            if (victories.isEmpty()) victories.putAll(fallbackRuleset.victories)
 
-            if (speeds.isEmpty()) speeds.putAll(RulesetCache.getVanillaRuleset().speeds)
+            if (speeds.isEmpty()) speeds.putAll(fallbackRuleset.speeds)
+            if (difficulties.isEmpty()) difficulties.putAll(fallbackRuleset.difficulties)
 
             if (cityStateTypes.isEmpty())
-                for (cityStateType in RulesetCache.getVanillaRuleset().cityStateTypes.values)
+                for (cityStateType in fallbackRuleset.cityStateTypes.values)
                     cityStateTypes[cityStateType.name] = CityStateType().apply {
                         name = cityStateType.name
                         color = cityStateType.color
@@ -497,6 +582,12 @@ class Ruleset {
             resource.setTransients(this)
     }
 
+    @VisibleForTesting
+    /** For use by class TestGame. Use only before triggering the globalUniques.uniqueObjects lazy. */
+    fun addGlobalUniques(vararg uniques: String) {
+        globalUniques.uniques.addAll(uniques)
+    }
+
     /** Used for displaying a RuleSet's name */
     override fun toString() = when {
         name.isNotEmpty() -> name
@@ -504,6 +595,7 @@ class Ruleset {
         else -> "Combined RuleSet ($mods)"
     }
 
+    @Readonly
     fun getSummary(): String {
         val stringList = ArrayList<String>()
         if (modOptions.isBaseRuleset) stringList += "Base Ruleset"
@@ -518,5 +610,5 @@ class Ruleset {
         return stringList.joinToString { it.tr() }
     }
 
-    fun getErrorList(tryFixUnknownUniques: Boolean = false) = RulesetValidator(this).getErrorList(tryFixUnknownUniques)
+    fun getErrorList(tryFixUnknownUniques: Boolean = false) = RulesetValidator.create(this, tryFixUnknownUniques).getErrorList()
 }

@@ -1,14 +1,11 @@
 package com.unciv
 
-import com.badlogic.gdx.Application
-import com.badlogic.gdx.Game
-import com.badlogic.gdx.Gdx
-import com.badlogic.gdx.Input
-import com.badlogic.gdx.Screen
-import com.badlogic.gdx.scenes.scene2d.actions.Actions
+import com.badlogic.gdx.*
+import com.unciv.UncivGame.Companion.Current
+import com.unciv.UncivGame.Companion.isCurrentInitialized
 import com.unciv.logic.GameInfo
-import com.unciv.logic.IsPartOfGameInfoSerialization
 import com.unciv.logic.UncivShowableException
+import com.unciv.logic.Version
 import com.unciv.logic.civilization.PlayerType
 import com.unciv.logic.files.UncivFiles
 import com.unciv.logic.multiplayer.Multiplayer
@@ -17,18 +14,17 @@ import com.unciv.models.ruleset.RulesetCache
 import com.unciv.models.skins.SkinCache
 import com.unciv.models.tilesets.TileSetCache
 import com.unciv.models.translations.Translations
-import com.unciv.models.translations.tr
 import com.unciv.ui.audio.MusicController
 import com.unciv.ui.audio.MusicMood
 import com.unciv.ui.audio.MusicTrackChooserFlags
 import com.unciv.ui.audio.SoundPlayer
-import com.unciv.ui.components.extensions.center
 import com.unciv.ui.components.fonts.Fonts
 import com.unciv.ui.crashhandling.CrashScreen
 import com.unciv.ui.crashhandling.wrapCrashHandlingUnit
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.ConfirmPopup
 import com.unciv.ui.popups.Popup
+import com.unciv.ui.screens.GameStartScreen
 import com.unciv.ui.screens.LanguagePickerScreen
 import com.unciv.ui.screens.LoadingScreen
 import com.unciv.ui.screens.basescreen.BaseScreen
@@ -37,19 +33,19 @@ import com.unciv.ui.screens.savescreens.LoadGameScreen
 import com.unciv.ui.screens.worldscreen.PlayerReadyScreen
 import com.unciv.ui.screens.worldscreen.WorldScreen
 import com.unciv.ui.screens.worldscreen.unit.AutoPlay
-import com.unciv.utils.Concurrency
-import com.unciv.utils.DebugUtils
-import com.unciv.utils.Display
-import com.unciv.utils.Log
-import com.unciv.utils.PlatformSpecific
-import com.unciv.utils.debug
-import com.unciv.utils.launchOnGLThread
-import com.unciv.utils.withGLContext
-import com.unciv.utils.withThreadPoolContext
+import com.unciv.utils.*
 import kotlinx.coroutines.CancellationException
+import yairm210.purity.annotations.Readonly
 import java.io.PrintWriter
-import java.util.EnumSet
-import java.util.UUID
+import java.util.*
+import kotlin.collections.ArrayDeque
+import kotlin.collections.asSequence
+import kotlin.collections.count
+import kotlin.collections.filter
+import kotlin.collections.forEach
+import kotlin.collections.listOf
+import kotlin.collections.none
+import kotlin.collections.removeAll
 import kotlin.reflect.KClass
 
 /** Represents the Unciv app itself:
@@ -133,12 +129,7 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
 
         ImageGetter.resetAtlases()
         ImageGetter.reloadImages()  // This needs to come after the settings, since we may have default visual mods
-        val imageGetterTilesets = ImageGetter.getAvailableTilesets()
-        val availableTileSets = TileSetCache.getAvailableTilesets(imageGetterTilesets)
-        if (settings.tileSet !in availableTileSets) { // If the configured tileset is no longer available, default back
-            settings.tileSet = Constants.defaultTileset
-        }
-
+        
         Gdx.graphics.isContinuousRendering = settings.continuousRendering
 
         Concurrency.run("LoadJSON") {
@@ -146,12 +137,16 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
             translations.tryReadTranslationForCurrentLanguage()
             translations.loadPercentageCompleteOfLanguages()
             TileSetCache.loadTileSetConfigs()
+            if (settings.tileSet !in TileSetCache) { // The configured tileset is no longer available, default back
+                settings.tileSet = Constants.defaultTileset
+            }
+
             SkinCache.loadSkinConfigs()
 
             val vanillaRuleset = RulesetCache.getVanillaRuleset()
 
-            if (settings.multiplayer.userId.isEmpty()) { // assign permanent user id
-                settings.multiplayer.userId = UUID.randomUUID().toString()
+            if (settings.multiplayer.getUserId().isEmpty()) { // assign permanent user id
+                settings.multiplayer.setUserId(UUID.randomUUID().toString())
                 settings.save()
             }
 
@@ -196,7 +191,7 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
 
         if (gameInfo?.gameParameters?.isOnlineMultiplayer == true
                 && gameInfo?.gameParameters?.anyoneCanSpectate == false
-                && gameInfo!!.civilizations.none { it.playerId == settings.multiplayer.userId }) {
+                && gameInfo!!.civilizations.none { it.playerId == settings.multiplayer.getUserId() }) {
             throw UncivShowableException("You are not allowed to spectate!")
         }
 
@@ -212,6 +207,7 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
             // we do it all in one swoop on the same thread and the application just "freezes" without loading screen for the duration.
             loadingScreen = LoadingScreen(getScreen())
             setScreen(loadingScreen)
+            Gdx.input.inputProcessor = null // It's just been set by setScreen, so unset it to avoid ANRs while loading
         }
 
         return@toplevel withGLContext {
@@ -219,7 +215,6 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
             screenStack.clear()
 
             worldScreen = null // This allows the GC to collect our old WorldScreen, otherwise we keep two WorldScreens in memory.
-            Gdx.input.inputProcessor = null // Avoid ANRs while loading
             val newWorldScreen = WorldScreen(newGameInfo, autoPlay, newGameInfo.getPlayerToViewAs(), worldScreenRestoreState)
             worldScreen = newWorldScreen
 
@@ -297,10 +292,15 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
      *
      * Automatically [disposes][BaseScreen.dispose] the old screen.
      *
+     * @param silentQuit Don't ask for exit confirmation when popping the last screen (for FasterUIDevelopment, where musicController is not initialized)
      * @return the new screen
      */
-    fun popScreen(): BaseScreen? {
+    fun popScreen(silentQuit: Boolean = false): BaseScreen? {
         if (screenStack.size == 1) {
+            if (silentQuit) {
+                Gdx.app.exit()
+                return null
+            }
             musicController.pause()
             worldScreen?.autoPlay?.stopAutoPlay()
             ConfirmPopup(
@@ -346,7 +346,9 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
     /** Get all currently existing screens of type [clazz]
      *  - Not a generic to allow screenStack to be private
      */
-    fun getScreensOfType(clazz: KClass<out BaseScreen>): Sequence<BaseScreen> = screenStack.asSequence().filter { it::class == clazz }
+    @Readonly
+    fun getScreensOfType(clazz: KClass<out BaseScreen>): Sequence<BaseScreen> = 
+        screenStack.asSequence().filter { it::class == clazz }
 
     /** Dispose and remove all currently existing screens of type [clazz]
      *  - Not a generic to allow screenStack to be private
@@ -366,7 +368,7 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
             }
         }
         try {
-            onlineMultiplayer.loadGame(deepLinkedMultiplayerGame!!)
+            onlineMultiplayer.downloadGame(deepLinkedMultiplayerGame!!)
         } catch (ex: Exception) {
             launchOnGLThread {
                 val mainMenu = MainMenuScreen()
@@ -449,28 +451,8 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
         }
     }
 
-    /** Handles an uncaught exception or error. First attempts a platform-specific handler, and if that didn't handle the exception or error, brings the game to a [CrashScreen]. */
-    fun handleUncaughtThrowable(ex: Throwable) {
-        if (ex is CancellationException) {
-            return // kotlin coroutines use this for control flow... so we can just ignore them.
-        }
-        Log.error("Uncaught throwable", ex)
-        try {
-            PrintWriter(files.fileWriter("lasterror.txt")).use {
-                ex.printStackTrace(it)
-            }
-        } catch (_: Exception) {
-            // ignore
-        }
-        Gdx.app.postRunnable {
-            Gdx.input.inputProcessor = null // CrashScreen needs to toJson which can take a while
-            // This may not be enough, we may need to run "generate crash text" in a different thread,
-            //   but for now let's try this.
-            setAsRootScreen(CrashScreen(ex))
-        }
-    }
-
     /** Returns the [worldScreen] if it is the currently active screen of the game */
+    @Readonly
     fun getWorldScreenIfActive(): WorldScreen? {
         return if (screen == worldScreen) worldScreen else null
     }
@@ -487,36 +469,52 @@ open class UncivGame(val isConsoleMode: Boolean = false) : Game(), PlatformSpeci
 
     companion object {
         //region AUTOMATICALLY GENERATED VERSION DATA - DO NOT CHANGE THIS REGION, INCLUDING THIS COMMENT
-        val VERSION = Version("4.16.4", 1119)
+        val VERSION = Version("4.19.15", 1204)
         //endregion
 
         /** Global reference to the one Gdx.Game instance created by the platform launchers - do not use without checking [isCurrentInitialized] first. */
         // Set by Gdx Game.create callback, or the special cases ConsoleLauncher and unit tests make do with out Gdx and set this themselves.
         lateinit var Current: UncivGame
         /** @return `true` if [Current] has been set yet and can be accessed */
-        fun isCurrentInitialized() = this::Current.isInitialized
+        @Readonly fun isCurrentInitialized() = this::Current.isInitialized
         /** Get the game currently in progress safely - null either if [Current] has not yet been set or if its gameInfo field has no game */
-        fun getGameInfoOrNull() = if (isCurrentInitialized()) Current.gameInfo else null
-        fun isCurrentGame(gameId: String): Boolean = isCurrentInitialized() && Current.gameInfo != null && Current.gameInfo!!.gameId == gameId
-        fun isDeepLinkedGameLoading() = isCurrentInitialized() && Current.deepLinkedMultiplayerGame != null
-    }
+        @Readonly fun getGameInfoOrNull() = if (isCurrentInitialized()) Current.gameInfo else null
+        @Readonly fun isCurrentGame(gameId: String): Boolean = isCurrentInitialized() && Current.gameInfo != null && Current.gameInfo!!.gameId == gameId
+        @Readonly fun isDeepLinkedGameLoading() = isCurrentInitialized() && Current.deepLinkedMultiplayerGame != null
 
-    data class Version(
-        val text: String,
-        val number: Int
-    ) : IsPartOfGameInfoSerialization {
-        @Suppress("unused") // used by json serialization
-        constructor() : this("", -1)
-        fun toNiceString() = "$text (Build ${number.tr()})"
-    }
-}
+        @Readonly
+        fun getUserAgent(fallbackStr: String = "Unknown"): String = if (isCurrentInitialized()) {
+            "Unciv/${VERSION.toNiceString()}-GNU-Terry-Pratchett"
+        } else "Unciv/$fallbackStr-GNU-Terry-Pratchett"
 
-class GameStartScreen : BaseScreen() {
-    init {
-        val logoImage = ImageGetter.getExternalImage("banner.png")
-        logoImage.center(stage)
-        logoImage.color.a = 0f
-        logoImage.addAction(Actions.alpha(1f, 0.3f))
-        stage.addActor(logoImage)
+        /** Handles an uncaught exception or error. First attempts a platform-specific handler, and if that didn't handle the exception or error, brings the game to a [CrashScreen]. */
+        fun handleUncaughtThrowable(ex: Throwable) {
+            if (ex is CancellationException) {
+                return // kotlin coroutines use this for control flow... so we can just ignore them.
+            }
+            Log.error("Uncaught throwable", ex)
+            dumpLastError(ex)
+            Gdx.app.postRunnable {
+                Gdx.input.inputProcessor =
+                    null // CrashScreen needs to toJson which can take a while
+                // This may not be enough, we may need to run "generate crash text" in a different thread,
+                //   but for now let's try this.
+                Current.setAsRootScreen(CrashScreen(ex))
+            }
+        }
+
+        private fun dumpLastError(ex: Throwable) {
+            try {
+                val files =
+                    if (isCurrentInitialized() && Current::files.isInitialized) Current.files
+                    else UncivFiles(Gdx.files, null)
+                PrintWriter(files.fileWriter("lasterror.txt")).use {
+                    ex.printStackTrace(it)
+                }
+            } catch (_: Exception) {
+                Log.debug("Failed to write exception to lasterror.txt", ex)
+                // ignore
+            }
+        }
     }
 }

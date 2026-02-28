@@ -19,6 +19,7 @@ import com.unciv.utils.debug
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
+import yairm210.purity.annotations.Readonly
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
@@ -48,7 +49,7 @@ class Multiplayer {
     private val lastAllGamesRefresh: AtomicReference<Instant?> = AtomicReference()
     private val lastCurGameRefresh: AtomicReference<Instant?> = AtomicReference()
 
-    val games: Set<MultiplayerGame> get() = multiplayerFiles.savedGames.values.toSet()
+    val games: Set<MultiplayerGamePreview> get() = multiplayerFiles.savedGames.values.toSet()
     val multiplayerGameUpdater: Job
 
     init {
@@ -69,16 +70,17 @@ class Multiplayer {
                 val currentGame = getCurrentGame()
                 val preview = currentGame?.preview
                 if (currentGame != null && (usesCustomServer() || preview == null || !preview.isUsersTurn())) {
-                    throttle(lastCurGameRefresh, multiplayerSettings.currentGameRefreshDelay, {}) { currentGame.requestUpdate() }
+                    throttle(lastCurGameRefresh, multiplayerSettings.currentGameRefreshDelay, {}, {}) { currentGame.requestUpdate() }
                 }
 
                 val doNotUpdate = if (currentGame == null) listOf() else listOf(currentGame)
-                throttle(lastAllGamesRefresh, multiplayerSettings.allGameRefreshDelay, {}) { requestUpdate(doNotUpdate = doNotUpdate) }
+                throttle(lastAllGamesRefresh, multiplayerSettings.allGameRefreshDelay, {}, {}) { requestUpdate(doNotUpdate = doNotUpdate) }
             }
         }.launchIn(CoroutineScope(Dispatcher.DAEMON))
     }
 
-    private fun getCurrentGame(): MultiplayerGame? {
+    @Readonly
+    private fun getCurrentGame(): MultiplayerGamePreview? {
         val gameInfo = UncivGame.Current.gameInfo
         return if (gameInfo != null && gameInfo.gameParameters.isOnlineMultiplayer) {
             multiplayerFiles.getGameByGameId(gameInfo.gameId)
@@ -92,10 +94,10 @@ class Multiplayer {
      *
      * Fires: [MultiplayerGameUpdateStarted], [MultiplayerGameUpdated], [MultiplayerGameUpdateUnchanged], [MultiplayerGameUpdateFailed]
      */
-    suspend fun requestUpdate(forceUpdate: Boolean = false, doNotUpdate: List<MultiplayerGame> = listOf()) {
+    suspend fun requestUpdate(forceUpdate: Boolean = false, doNotUpdate: List<MultiplayerGamePreview> = listOf()) {
         val fileThrottleInterval = if (forceUpdate) Duration.ZERO else FILE_UPDATE_THROTTLE_PERIOD
-        // An exception only happens here if the files can't be listed, should basically never happen
-        throttle(lastFileUpdate, fileThrottleInterval, {}, action = {multiplayerFiles.updateSavesFromFiles()})
+        // An exception only happens muhere if the files can't be listed, should basically never happen
+        throttle(lastFileUpdate, fileThrottleInterval, {}, {}, action = {multiplayerFiles.updateSavesFromFiles()})
 
         for (game in multiplayerFiles.savedGames.values.toList()) { // since updates are long, .toList for immutability
             if (game in doNotUpdate) continue
@@ -111,7 +113,7 @@ class Multiplayer {
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time
      */
     suspend fun createGame(newGame: GameInfo) {
-        multiplayerServer.tryUploadGame(newGame, withPreview = true)
+        multiplayerServer.uploadGame(newGame, withPreview = true)
         multiplayerFiles.addGame(newGame)
     }
 
@@ -144,25 +146,24 @@ class Multiplayer {
      * @throws MultiplayerAuthException if the authentication failed
      * @return false if it's not the user's turn and thus resigning did not happen
      */
-    suspend fun resignCurrentPlayer(game: MultiplayerGame): Boolean {
+    suspend fun resignPlayer(game: MultiplayerGamePreview, playerCivName: String): String {
         val preview = game.preview ?: throw game.error!!
         // download to work with the latest game state
         val gameInfo = multiplayerServer.tryDownloadGame(preview.gameId)
-
-
+        
         if (gameInfo.currentPlayer != preview.currentPlayer) {
-            game.doManualUpdate(gameInfo.asPreview())
-            return false
+            game.updatePreview(gameInfo.asPreview())
+            return "Game was out of sync with server - updated"
         }
 
-        val playerCiv = gameInfo.getCurrentPlayerCivilization()
+        val playerCiv = gameInfo.getCivilization(playerCivName)
 
         //Set civ info to AI
         playerCiv.playerType = PlayerType.AI
         playerCiv.playerId = ""
 
         //call next turn so turn gets simulated by AI
-        gameInfo.nextTurn()
+        if (gameInfo.currentPlayer == playerCivName) gameInfo.nextTurn()
 
         //Add notification so everyone knows what happened
         //call for every civ cause AI players are skipped anyway
@@ -171,16 +172,16 @@ class Multiplayer {
                 NotificationCategory.General, playerCiv.civName)
         }
 
-        val newPreview = gameInfo.asPreview()
-        multiplayerFiles.files.saveGame(newPreview, game.fileHandle)
-        multiplayerServer.tryUploadGame(gameInfo, withPreview = true)
-        game.doManualUpdate(newPreview)
-        return true
+        multiplayerServer.uploadGame(gameInfo, withPreview = true)
+        game.updatePreview(gameInfo.asPreview())
+        return ""
     }
 
     /** Returns false if game was not up to date
-     * Returned value indicates an error string - will be null if successful  */
-    suspend fun skipCurrentPlayerTurn(game: MultiplayerGame): String? {
+     * Returned value indicates an error string - will be null if successful
+     * We always pass in the player name to ensure if the button was clicked twice we don't skip 2 turns 
+     * */
+    suspend fun skipCurrentPlayerTurn(game: MultiplayerGamePreview, player: String): String? {
         val preview = game.preview ?: return game.error!!.message
         // download to work with the latest game state
         val gameInfo: GameInfo
@@ -192,18 +193,20 @@ class Multiplayer {
         }
         
         if (gameInfo.currentPlayer != preview.currentPlayer) {
-            game.doManualUpdate(gameInfo.asPreview())
-            return "Could not pass turn - current player has been updated!"
+            game.updatePreview(gameInfo.asPreview())
+            return "Game was out of sync with server - updated"
+        }
+        
+        if (gameInfo.currentPlayer != player) {
+            return "Could not pass turn - current player is ${gameInfo.currentPlayer}, not $player"
         }
 
         val playerCiv = gameInfo.getCurrentPlayerCivilization()
         NextTurnAutomation.automateCivMoves(playerCiv, false)
         gameInfo.nextTurn()
 
-        val newPreview = gameInfo.asPreview()
-        multiplayerFiles.files.saveGame(newPreview, game.fileHandle)
-        multiplayerServer.tryUploadGame(gameInfo, withPreview = true)
-        game.doManualUpdate(newPreview)
+        multiplayerServer.uploadGame(gameInfo, withPreview = true)
+        game.updatePreview(gameInfo.asPreview())
         return null
     }
 
@@ -211,16 +214,16 @@ class Multiplayer {
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time
      * @throws MultiplayerFileNotFoundException if the file can't be found
      */
-    suspend fun loadGame(game: MultiplayerGame) {
+    suspend fun downloadGame(game: MultiplayerGamePreview) {
         val preview = game.preview ?: throw game.error!!
-        loadGame(preview.gameId)
+        downloadGame(preview.gameId)
     }
 
     /** Downloads game, and updates it locally
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time
      * @throws MultiplayerFileNotFoundException if the file can't be found
      */
-    suspend fun loadGame(gameId: String) = coroutineScope {
+    suspend fun downloadGame(gameId: String) = coroutineScope {
         val gameInfo = multiplayerServer.downloadGame(gameId)
         val preview = gameInfo.asPreview()
         val onlineGame = multiplayerFiles.getGameByGameId(gameId)
@@ -228,7 +231,7 @@ class Multiplayer {
         if (onlineGame == null) {
             createGame(gameInfo)
         } else if (onlinePreview != null && hasNewerGameState(preview, onlinePreview)) {
-            onlineGame.doManualUpdate(preview)
+            onlineGame.updatePreview(preview)
         }
         UncivGame.Current.loadGame(gameInfo)
     }
@@ -236,14 +239,14 @@ class Multiplayer {
     /**
      * Checks if the given game is current and loads it, otherwise loads the game from the server
      */
-    suspend fun loadGame(gameInfo: GameInfo) = coroutineScope {
+    suspend fun downloadGame(gameInfo: GameInfo) = coroutineScope {
         val gameId = gameInfo.gameId
         val preview = multiplayerServer.tryDownloadGamePreview(gameId)
         if (hasLatestGameState(gameInfo, preview)) {
             gameInfo.isUpToDate = true
             UncivGame.Current.loadGame(gameInfo)
         } else {
-            loadGame(gameId)
+            downloadGame(gameId)
         }
     }
 
@@ -257,19 +260,20 @@ class Multiplayer {
      */
     suspend fun updateGame(gameInfo: GameInfo) {
         debug("Updating remote game %s", gameInfo.gameId)
-        multiplayerServer.tryUploadGame(gameInfo, withPreview = true)
+        multiplayerServer.uploadGame(gameInfo, withPreview = true)
         val game = multiplayerFiles.getGameByGameId(gameInfo.gameId)
         debug("Existing OnlineMultiplayerGame: %s", game)
         if (game == null) {
             multiplayerFiles.addGame(gameInfo)
         } else {
-            game.doManualUpdate(gameInfo.asPreview())
+            game.updatePreview(gameInfo.asPreview())
         }
     }
 
     /**
      * Checks if [gameInfo] and [preview] are up-to-date with each other.
      */
+    @Readonly
     fun hasLatestGameState(gameInfo: GameInfo, preview: GameInfoPreview): Boolean {
         // TODO look into how to maybe extract interfaces to not make this take two different methods
         return gameInfo.currentPlayer == preview.currentPlayer
@@ -280,12 +284,13 @@ class Multiplayer {
     /**
      * Checks if [preview1] has a more recent game state than [preview2]
      */
+    @Readonly
     private fun hasNewerGameState(preview1: GameInfoPreview, preview2: GameInfoPreview): Boolean {
         return preview1.turns > preview2.turns
     }
 
     companion object {
-        fun usesCustomServer() = UncivGame.Current.settings.multiplayer.server != Constants.dropboxMultiplayerServer
+        fun usesCustomServer() = UncivGame.Current.settings.multiplayer.getServer() != Constants.dropboxMultiplayerServer
         fun usesDropbox() = !usesCustomServer()
     }
 }
@@ -303,7 +308,7 @@ suspend fun <T> throttle(
     lastSuccessfulExecution: AtomicReference<Instant?>,
     throttleInterval: Duration,
     onNoExecution: () -> T,
-    onFailed: (Throwable) -> T = { throw it },
+    onFailed: (Throwable) -> T,
     action: suspend () -> T
 ): T {
     val lastExecution = lastSuccessfulExecution.get()
@@ -341,5 +346,5 @@ suspend fun <T> attemptAction(
 }
 
 
-fun GameInfoPreview.isUsersTurn() = getCivilization(currentPlayer).playerId == UncivGame.Current.settings.multiplayer.userId
-fun GameInfo.isUsersTurn() = currentPlayer.isNotEmpty() && getCivilization(currentPlayer).playerId == UncivGame.Current.settings.multiplayer.userId
+fun GameInfoPreview.isUsersTurn() = getCivilization(currentPlayer).playerId == UncivGame.Current.settings.multiplayer.getUserId()
+fun GameInfo.isUsersTurn() = currentPlayer.isNotEmpty() && getCivilization(currentPlayer).playerId == UncivGame.Current.settings.multiplayer.getUserId()

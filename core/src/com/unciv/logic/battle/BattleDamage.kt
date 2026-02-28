@@ -3,12 +3,15 @@ package com.unciv.logic.battle
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.Counter
 import com.unciv.models.ruleset.GlobalUniques
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.Unique
 import com.unciv.models.ruleset.unique.UniqueTarget
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.extensions.toPercent
+import yairm210.purity.annotations.LocalState
+import yairm210.purity.annotations.Pure
+import yairm210.purity.annotations.Readonly
 import kotlin.collections.set
 import kotlin.math.max
 import kotlin.math.pow
@@ -17,6 +20,7 @@ import kotlin.random.Random
 
 object BattleDamage {
 
+    @Readonly
     private fun getModifierStringFromUnique(unique: Unique): String {
         val source = when (unique.sourceObjectType) {
             UniqueTarget.Unit -> "Unit ability"
@@ -30,30 +34,27 @@ object BattleDamage {
         return "$source - $conditionalsText"
     }
 
+    @Readonly
     private fun getGeneralModifiers(combatant: ICombatant, enemy: ICombatant, combatAction: CombatAction, tileToAttackFrom: Tile): Counter<String> {
         val modifiers = Counter<String>()
 
-        val conditionalState = getStateForConditionals(combatAction, combatant, enemy)
+        val conditionalState = getGameContext(combatAction, combatant, enemy)
         val civInfo = combatant.getCivInfo()
 
         if (combatant is MapUnitCombatant) {
 
-            addUnitUniqueModifiers(combatant, enemy, conditionalState, tileToAttackFrom, modifiers)
+            val unitUniqueModifiers = getUnitUniqueModifiers(combatant, enemy, conditionalState, tileToAttackFrom)
+            modifiers.add(unitUniqueModifiers)
 
-            addResourceLackingMalus(combatant, modifiers)
+            val civResources = civInfo.getCivResourcesByName()
+            for (resource in combatant.unit.getResourceRequirementsPerTurn().keys)
+                if (civResources[resource]!! < 0 && !civInfo.isBarbarian)
+                    modifiers["Missing resource"] = BattleConstants.MISSING_RESOURCES_MALUS
 
             val (greatGeneralName, greatGeneralBonus) = GreatGeneralImplementation.getGreatGeneralBonus(combatant, enemy, combatAction)
             if (greatGeneralBonus != 0)
                 modifiers[greatGeneralName] = greatGeneralBonus
 
-            for (unique in combatant.unit.getMatchingUniques(UniqueType.StrengthWhenStacked)) {
-                var stackedUnitsBonus = 0
-                if (combatant.unit.getTile().getUnits().any { it.matchesFilter(unique.params[1]) })
-                    stackedUnitsBonus += unique.params[0].toInt()
-
-                if (stackedUnitsBonus > 0)
-                    modifiers["Stacked with [${unique.params[1]}]"] = stackedUnitsBonus
-            }
         } else if (combatant is CityCombatant) {
             for (unique in combatant.city.getMatchingUniques(UniqueType.StrengthForCities, conditionalState)) {
                 modifiers.add(getModifierStringFromUnique(unique), unique.params[0].toInt())
@@ -68,16 +69,17 @@ object BattleDamage {
         return modifiers
     }
 
-    private fun getStateForConditionals(
+    @Readonly
+    private fun getGameContext(
         combatAction: CombatAction,
         combatant: ICombatant,
         enemy: ICombatant,
-    ): StateForConditionals {
+    ): GameContext {
         val attackedTile =
             if (combatAction == CombatAction.Attack) enemy.getTile()
             else combatant.getTile()
 
-        val conditionalState = StateForConditionals(
+        val conditionalState = GameContext(
             combatant.getCivInfo(),
             city = (combatant as? CityCombatant)?.city,
             ourCombatant = combatant,
@@ -88,9 +90,11 @@ object BattleDamage {
         return conditionalState
     }
 
-    private fun addUnitUniqueModifiers(combatant: MapUnitCombatant, enemy: ICombatant, conditionalState: StateForConditionals,
-                                       tileToAttackFrom: Tile, modifiers: Counter<String>) {
+    @Readonly
+    private fun getUnitUniqueModifiers(combatant: MapUnitCombatant, enemy: ICombatant, conditionalState: GameContext,
+                                       tileToAttackFrom: Tile): Counter<String> {
         val civInfo = combatant.getCivInfo()
+        val modifiers = Counter<String>()
 
         for (unique in combatant.getMatchingUniques(UniqueType.Strength, conditionalState, true)) {
             modifiers.add(getModifierStringFromUnique(unique), unique.params[0].toInt())
@@ -106,7 +110,7 @@ object BattleDamage {
             // https://steamcommunity.com/sharedfiles/filedetails/?id=326411722#464287
             val effect = unique.params[0].toInt() - 3 * distance
             if (effect > 0)
-                modifiers.add("${unique.sourceObjectName} (${unique.getSourceNameForUser()})", effect)
+                modifiers.add(getModifierStringFromUnique(unique), effect)
         }
 
         //https://www.carlsguides.com/strategy/civilization5/war/combatbonuses.php
@@ -124,25 +128,20 @@ object BattleDamage {
         if (strengthMalus != null) {
             modifiers.add("Adjacent enemy units", strengthMalus.params[0].toInt())
         }
+        return modifiers
     }
 
-    private fun addResourceLackingMalus(combatant: MapUnitCombatant, modifiers: Counter<String>) {
-        val civInfo = combatant.getCivInfo()
-        val civResources = civInfo.getCivResourcesByName()
-        for (resource in combatant.unit.getResourceRequirementsPerTurn().keys)
-            if (civResources[resource]!! < 0 && !civInfo.isBarbarian)
-                modifiers["Missing resource"] = BattleConstants.MISSING_RESOURCES_MALUS
-    }
-
+    @Readonly
     fun getAttackModifiers(
         attacker: ICombatant,
         defender: ICombatant, tileToAttackFrom: Tile
     ): Counter<String> {
-        val modifiers = getGeneralModifiers(attacker, defender, CombatAction.Attack, tileToAttackFrom)
-        
+        @LocalState val modifiers = getGeneralModifiers(attacker, defender, CombatAction.Attack, tileToAttackFrom)
+
         if (attacker is MapUnitCombatant) {
 
-            addTerrainAttackModifiers(attacker, defender, tileToAttackFrom, modifiers)
+            val terrainAttackModifiers = getTerrainAttackModifiers(attacker, defender, tileToAttackFrom)
+            modifiers.add(terrainAttackModifiers)
 
             // Air unit attacking with Air Sweep
             if (attacker.unit.isPreparingAirSweep())
@@ -151,7 +150,7 @@ object BattleDamage {
             if (attacker.isMelee()) {
                 val numberOfOtherAttackersSurroundingDefender = defender.getTile().neighbors.count {
                     it.militaryUnit != null && it.militaryUnit != attacker.unit
-                            && it.militaryUnit!!.owner == attacker.getCivInfo().civName
+                            && it.militaryUnit!!.civ == attacker.getCivInfo()
                             && MapUnitCombatant(it.militaryUnit!!).isMelee()
                 }
                 if (numberOfOtherAttackersSurroundingDefender > 0) {
@@ -159,7 +158,7 @@ object BattleDamage {
 
                     // e.g., Discipline policy - https://civilization.fandom.com/wiki/Discipline_(Civ5)
                     for (unique in attacker.unit.getMatchingUniques(UniqueType.FlankAttackBonus, checkCivInfoUniques = true,
-                            stateForConditionals = getStateForConditionals(CombatAction.Attack, attacker, defender)))
+                            gameContext = getGameContext(CombatAction.Attack, attacker, defender)))
                         flankingBonus *= unique.params[0].toPercent()
                     modifiers["Flanking"] =
                         (flankingBonus * numberOfOtherAttackersSurroundingDefender).toInt()
@@ -171,8 +170,9 @@ object BattleDamage {
         return modifiers
     }
 
-    private fun addTerrainAttackModifiers(attacker: MapUnitCombatant, defender: ICombatant,
-                                          tileToAttackFrom: Tile, modifiers: Counter<String>) {
+    @Readonly
+    private fun getTerrainAttackModifiers(attacker: MapUnitCombatant, defender: ICombatant, tileToAttackFrom: Tile): Counter<String> {
+        val modifiers = Counter<String>()
         if (attacker.unit.isEmbarked() && defender.getTile().isLand
             && !attacker.unit.hasUnique(UniqueType.AttackAcrossCoast)
         )
@@ -192,8 +192,10 @@ object BattleDamage {
 
         if (isMeleeAttackingAcrossRiverWithNoBridge(attacker, tileToAttackFrom, defender))
             modifiers["Across river"] = BattleConstants.ATTACKING_ACROSS_RIVER_MALUS
+        return modifiers
     }
 
+    @Readonly
     private fun isMeleeAttackingAcrossRiverWithNoBridge(attacker: MapUnitCombatant, tileToAttackFrom: Tile, defender: ICombatant) = (
         attacker.isMelee()
             &&
@@ -206,6 +208,7 @@ object BattleDamage {
                 || !attacker.getCivInfo().tech.roadsConnectAcrossRivers)
         )
 
+    @Readonly
     fun getAirSweepAttackModifiers(
         attacker: ICombatant
     ): Counter<String> {
@@ -220,8 +223,9 @@ object BattleDamage {
         return modifiers
     }
 
+    @Readonly
     fun getDefenceModifiers(attacker: ICombatant, defender: ICombatant, tileToAttackFrom: Tile): Counter<String> {
-        val modifiers = getGeneralModifiers(defender, attacker, CombatAction.Defend, tileToAttackFrom)
+        @LocalState val modifiers = getGeneralModifiers(defender, attacker, CombatAction.Defend, tileToAttackFrom)
         val tile = defender.getTile()
 
         if (defender is MapUnitCombatant && !defender.unit.isEmbarked()) { // Embarked units get no terrain defensive bonuses
@@ -240,13 +244,14 @@ object BattleDamage {
         return modifiers
     }
 
-
+    @Readonly
     private fun modifiersToFinalBonus(modifiers: Counter<String>): Float {
         var finalModifier = 1f
         for (modifierValue in modifiers.values) finalModifier += modifierValue / 100f
         return finalModifier
     }
 
+    @Readonly
     private fun getHealthDependantDamageRatio(combatant: ICombatant): Float {
         return if (combatant !is MapUnitCombatant
             || combatant.unit.hasUnique(UniqueType.NoDamagePenaltyWoundedUnits, checkCivInfoUniques = true)
@@ -259,30 +264,38 @@ object BattleDamage {
     /**
      * Includes attack modifiers
      */
+    @Readonly
     fun getAttackingStrength(
         attacker: ICombatant,
         defender: ICombatant,
         tileToAttackFrom: Tile
     ): Float {
         val attackModifier = modifiersToFinalBonus(getAttackModifiers(attacker, defender, tileToAttackFrom))
-        return max(1f, attacker.getAttackingStrength() * attackModifier)
+        return max(1f, attacker.getAttackingStrength(defender) * attackModifier)
     }
 
 
     /**
      * Includes defence modifiers
      */
+    @Readonly
     fun getDefendingStrength(attacker: ICombatant, defender: ICombatant, tileToAttackFrom: Tile): Float {
         val defenceModifier = modifiersToFinalBonus(getDefenceModifiers(attacker, defender, tileToAttackFrom))
-        return max(1f, defender.getDefendingStrength(attacker.isRanged()) * defenceModifier)
+        return max(1f, defender.getDefendingStrength(attacker) * defenceModifier)
     }
+    
+    @Readonly
+    fun getRandomness(combatant: ICombatant): Float = 
+        Random(combatant.getCivInfo().gameInfo.turns
+                * combatant.getTile().position.toVector2().hashCode().toLong()).nextFloat()
 
+    @Readonly
     fun calculateDamageToAttacker(
         attacker: ICombatant,
         defender: ICombatant,
         tileToAttackFrom: Tile = defender.getTile(),
         /** Between 0 and 1. */
-        randomnessFactor: Float = Random(attacker.getCivInfo().gameInfo.turns * attacker.getTile().position.hashCode().toLong()).nextFloat()
+        randomnessFactor: Float = getRandomness(attacker)
     ): Int {
         if (attacker.isRanged() && !attacker.isAirUnit()) return 0
         if (defender.isCivilian()) return 0
@@ -291,12 +304,13 @@ object BattleDamage {
         return (damageModifier(ratio, true, randomnessFactor) * getHealthDependantDamageRatio(defender)).roundToInt()
     }
 
+    @Readonly
     fun calculateDamageToDefender(
         attacker: ICombatant,
         defender: ICombatant,
         tileToAttackFrom: Tile = defender.getTile(),
         /** Between 0 and 1.  Defaults to turn and location-based random to avoid save scumming */
-        randomnessFactor: Float = Random(defender.getCivInfo().gameInfo.turns * defender.getTile().position.hashCode().toLong()).nextFloat()
+        randomnessFactor: Float = getRandomness(defender)
         ,
     ): Int {
         if (defender.isCivilian()) return BattleConstants.DAMAGE_TO_CIVILIAN_UNIT
@@ -305,6 +319,7 @@ object BattleDamage {
         return (damageModifier(ratio, false, randomnessFactor) * getHealthDependantDamageRatio(attacker)).roundToInt()
     }
 
+    @Pure
     private fun damageModifier(
         attackerToDefenderRatio: Float,
         damageToAttacker: Boolean,

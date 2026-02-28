@@ -1,6 +1,7 @@
 
 import com.unciv.build.AndroidImagePacker
 import com.unciv.build.BuildConfig
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 plugins {
@@ -9,7 +10,7 @@ plugins {
 }
 
 android {
-    compileSdk = 35
+    compileSdk = 36
     sourceSets {
         getByName("main").apply {
             manifest.srcFile("AndroidManifest.xml")
@@ -38,8 +39,10 @@ android {
     }
 
     // necessary for Android Work lib
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8.toString()
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_1_8
+        }
     }
 
     // Had to add this crap for Travis to build, it wanted to sign the app
@@ -83,7 +86,7 @@ android {
     }
 }
 
-task("texturePacker") {
+tasks.register("texturePacker") {
     doFirst {
         logger.info("Calling TexturePacker")
         AndroidImagePacker.packImages(projectDir.path)
@@ -93,7 +96,7 @@ task("texturePacker") {
 // called every time gradle gets executed, takes the native dependencies of
 // the natives configuration, and extracts them to the proper libs/ folders
 // so they get packed with the APK.
-task("copyAndroidNatives") {
+tasks.register("copyAndroidNatives") {
     val natives: Configuration by configurations
 
     doFirst {
@@ -120,9 +123,9 @@ tasks.whenTaskAdded {
     }
 }
 
-tasks.register<JavaExec>("run") {
+private fun getSdkPath(): String? {
     val localProperties = project.file("../local.properties")
-    val path = if (localProperties.exists()) {
+    return if (localProperties.exists()) {
         val properties = Properties()
         localProperties.inputStream().use { properties.load(it) }
 
@@ -130,22 +133,25 @@ tasks.register<JavaExec>("run") {
     } else {
         System.getenv("ANDROID_HOME")
     }
+}
 
+tasks.register<Exec>("run") {
+    standardOutput = System.out
+    errorOutput = System.err
+    isIgnoreExitValue = false
+
+    val path = getSdkPath()
     val adb = "$path/platform-tools/adb"
 
-    doFirst {
-        project.exec {
-            commandLine(adb, "shell", "am", "start", "-n", "com.unciv.app/AndroidLauncher")
-        }
-    }
+    commandLine(adb, "shell", "am", "start", "-n", "com.unciv.app/AndroidLauncher")
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.3")
     // Needed to convert e.g. Android 26 API calls to Android 21
     // If you remove this run `./gradlew :android:lintDebug` to ensure everything's okay.
     // If you want to upgrade this, check it's working by building an apk,
     //   or by running `./gradlew :android:assembleRelease` which does that
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

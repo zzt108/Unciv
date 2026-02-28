@@ -112,6 +112,11 @@ TODO: Might need better translation!
 - Melee Water `Bliska Borba na Vodi`
 - WaterMelee `BliskaBorbaNaVodi`
 
+TODO: Possibly better translation depnding on context
+
+- `... from ...` `od` instead of `iz` and vice versa
+- `... per ...` `za` instead of `po` and vice versa
+
 ### Unresolved Translation
 
 Not yet translated words, mostly because no sane translation exits to Croatian language.
@@ -172,8 +177,10 @@ Not yet translated words, mostly because no sane translation exits to Croatian l
 - Cancel `Poništi`, `Otkaži` (Ukini)
 - Choose `Odaberi`, `Izaberi`
 - Select `Odaberi` (Izaberi)
-- Upon `Pri`, `Prilikom`, `Po`, `Nakon` OR `Na`, `Nad`
 - Discovering `Otkriće`, `Otkrivanje`
+- Acquire `Stekni`, `Kupi`
+- Gain `Dobij` `Stekni`
+- Upon `Prilikom`, `Po`, `Nakon`, `Na`, `Nad` (Pri)
 
 ### Untranslated words
 
@@ -208,6 +215,9 @@ Deliberately shorter name for convenience
 Borrowed translation because no translation exists
 
 - Hakkapeliitta
+- Chu-Ko-Nu
+- Hwacha
+- Minuteman
 
 [Table of Contents](#table-of-contents)
 
@@ -241,9 +251,9 @@ Exceptions (use sparingly to retain consistency):
 
 - Use formal form where appropriate to avoid grammatical gender
 - Use formal form where appropriate to simplify grammar
-- Switch from formal or informal (mixture) where appropriate to make it sound more natural or consistent, e.g. UI prompt
+- Switch between formal or informal (mixture) where appropriate to make it sound more natural or consistent, e.g. UI prompt
 
-NOTE: Switching from formal and informal is used in diplomacy
+NOTE: Switching between formal and informal is used in diplomacy
 
 Examples (formal vs informal, to check for correct usage e.g. in combination with placeholders):
 
@@ -289,11 +299,6 @@ Examples (to check for correct usage e.g. in combination with placeholders):
 - Njihovim vs Njihovom
 - Njihovog vs Njihove
 
-TODO: Usage not fully checked:
-
-- `(a)`, `(la)`, `(ica)`, `(ice)`, `(kinjo)`, `(icom)`, `(jela)`, `(na)`, `(om)`, `(icom)` (All feminine)
-- `*io`, `*la`
-
 Exceptions:
 
 - Use neuter where appropriate to avoid grammatical gender
@@ -309,13 +314,18 @@ Correct vs incorrect
 - s vs sa (Depends on orthography)
 - s `[` vs sa `[`
 - Unikat vs Unikatno/i (Depends on context)
-- Check for double spaces
+- Osnivati (nesvršeni glagol) vs Osnovati (svršeni glagol)
+
+TODO: `... se ...` can be placed before or after verb/noun/adjective etc.
+TODO: Check for double spaces
+TODO: Check casing
+TODO: Check if translation ends with dot or not same as English version
 
 [Table of Contents](#table-of-contents)
 
 ## Placeholder genders
 
-When grammatical gender around a placeholder is needed we use majority gender of the placeholder.</br>
+When grammatical gender around a placeholder is needed we use majority gender of the placeholder across translation file.</br>
 "not applicable" subsection, means a placeholder has gender but is not needed or used in translation.
 
 ### Feminine
@@ -582,6 +592,7 @@ The following resources were helpful for translation of cities and person names:
   Note that some cases are orthographically correct.
 
 - Avoid anglicisms, germanisms and other borrowed words unless there is no actual Croatian equivalent
+
 - Avoid archaisms
 
 [Table of Contents](#table-of-contents)

@@ -1,6 +1,7 @@
 package com.unciv.logic.map
 
 import com.unciv.logic.IsPartOfGameInfoSerialization
+import yairm210.purity.annotations.Readonly
 
 
 /**
@@ -66,7 +67,7 @@ class MapSize private constructor(
          */
 
         companion object {
-            fun safeValueOf(name: String) = values().firstOrNull { it.name == name } ?: Tiny
+            @Readonly fun safeValueOf(name: String) = entries.firstOrNull { it.name == name } ?: Tiny
         }
     }
 
@@ -78,15 +79,17 @@ class MapSize private constructor(
         val Tiny get() = MapSize(Predefined.Tiny)
         val Small get() = MapSize(Predefined.Small)
         val Medium get() = MapSize(Predefined.Medium)
+        val Large get() = MapSize(Predefined.Large)
         val Huge get() = MapSize(Predefined.Huge)
-        fun names() = Predefined.values().map { it.name }
+        fun names() = Predefined.entries.map { it.name }
     }
 
     fun clone() = MapSize(name, radius, width, height)
 
+    @Readonly
     fun getPredefinedOrNextSmaller(): Predefined {
         if (name != custom) return Predefined.safeValueOf(name)
-        for (predef in Predefined.values().reversed()) {
+        for (predef in Predefined.entries.reversed()) {
             if (radius >= predef.radius) return predef
         }
         return Predefined.Tiny
@@ -128,8 +131,8 @@ class MapSize private constructor(
     private fun setNewRadius(radius: Int) {
         this.radius = radius
         val size = HexMath.getEquivalentRectangularSize(radius)
-        width = size.x.toInt()
-        height = size.y.toInt()
+        width = size.x
+        height = size.y
     }
 
     // For debugging and MapGenerator console output

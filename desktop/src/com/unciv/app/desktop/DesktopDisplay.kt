@@ -68,11 +68,14 @@ enum class DesktopScreenMode : ScreenMode {
 
         Gdx.graphics.setWindowedMode(width, height)
 
-        return width == maximumWindowBounds.width && height == maximumWindowBounds.height
+        val widthDiff = maximumWindowBounds.width - width
+        val heightDiff = maximumWindowBounds.height - height
+        val tolerance = 30
+        return widthDiff <= tolerance && heightDiff <= tolerance
     }
 
     companion object {
-        operator fun get(id: Int) = values()[id]
+        operator fun get(id: Int) = entries[id]
 
         private fun getWindow() = (Gdx.graphics as? Lwjgl3Graphics)?.window
 
@@ -124,7 +127,7 @@ enum class DesktopScreenMode : ScreenMode {
 class DesktopDisplay : PlatformDisplay {
 
     override fun getScreenModes() =
-        DesktopScreenMode.values().associateBy { it.getId() }
+        DesktopScreenMode.entries.associateBy { it.getId() }
 
     override fun setScreenMode(id: Int, settings: GameSettings) {
         DesktopScreenMode[id].activate(settings)

@@ -12,7 +12,7 @@ import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.nation.Nation
 import com.unciv.models.ruleset.tile.*
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
 import com.unciv.ui.audio.MusicMood
@@ -57,7 +57,7 @@ class MapEditorEditTerrainTab(
 
     private fun allTerrains() = ruleset.terrains.values.asSequence()
         .filter { it.type.isBaseTerrain }
-        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, StateForConditionals.IgnoreConditionals) }
+        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, GameContext.IgnoreConditionals) }
     private fun getTerrains() = allTerrains()
         .map { FormattedLine(it.name, it.name, "Terrain/${it.name}", size = 32) }
         .asIterable()
@@ -99,7 +99,7 @@ class MapEditorEditFeaturesTab(
 
     private fun allowedFeatures() = ruleset.terrains.values.asSequence()
         .filter { it.type == TerrainType.TerrainFeature }
-        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, StateForConditionals.IgnoreConditionals) }
+        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, GameContext.IgnoreConditionals) }
     private fun getFeatures() = allowedFeatures()
         .map { FormattedLine(it.name, it.name, "Terrain/${it.name}", size = 32) }
         .asIterable()
@@ -133,7 +133,7 @@ class MapEditorEditWondersTab(
 
     private fun allowedWonders() = ruleset.terrains.values.asSequence()
         .filter { it.type == TerrainType.NaturalWonder }
-        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, StateForConditionals.IgnoreConditionals) }
+        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, GameContext.IgnoreConditionals) }
     private fun getWonders() = allowedWonders()
         .map { FormattedLine(it.name, it.name, "Terrain/${it.name}", size = 32) }
         .asIterable()
@@ -158,7 +158,7 @@ class MapEditorEditResourcesTab(
         val eraser = FormattedLine("Remove resource", icon = eraserIcon, size = 32, iconCrossed = true)
         add(eraser.render(0f).apply { onClick {
             editTab.setBrush("Remove resource", eraserIcon, pediaLink = "", isRemove = true) { tile ->
-                tile.resource = null
+                tile.tileResource = null
                 tile.resourceAmount = 0
             }
         } }).padBottom(0f).row()
@@ -169,7 +169,7 @@ class MapEditorEditResourcesTab(
         ) { resourceName ->
             val resource = ruleset.tileResources[resourceName]!!
             editTab.setBrush(resourceName, resource.makeLink()) {
-                if (it.resource == resourceName && resource.resourceType == ResourceType.Strategic)
+                if (it.tileResource == resource && resource.resourceType == ResourceType.Strategic)
                     it.resourceAmount = (it.resourceAmount + 1).coerceAtMost(42)
                 else
                     it.setTileResource(resource, rng = editTab.randomness.RNG)
@@ -179,7 +179,7 @@ class MapEditorEditResourcesTab(
 
     private fun allowedResources() = ruleset.tileResources.values.asSequence()
         .filterNot { it.hasUnique(UniqueType.CityStateOnlyResource) }
-        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, StateForConditionals.IgnoreConditionals) }
+        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, GameContext.IgnoreConditionals) }
     private fun getResources(): Iterable<FormattedLine> = sequence {
         var lastGroup = ResourceType.Bonus
         for (resource in allowedResources()) {
@@ -234,7 +234,7 @@ class MapEditorEditImprovementsTab(
     }
 
     private fun allowedImprovements() = ruleset.tileImprovements.values.asSequence()
-        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, StateForConditionals.IgnoreConditionals) }
+        .filterNot { it.hasUnique(UniqueType.ExcludedFromMapEditor, GameContext.IgnoreConditionals) }
     private fun getImprovements(): Iterable<FormattedLine> = sequence {
         var lastGroup = 0
         for (improvement in allowedImprovements()) {
@@ -368,8 +368,8 @@ class MapEditorEditRiversTab(
                     tile.hasBottomRightRiver = false
                     tile.hasBottomRiver = false
                     // User probably expects all six edges to be cleared
-                    val x = tile.position.x.toInt()
-                    val y = tile.position.y.toInt()
+                    val x = tile.position.x
+                    val y = tile.position.y
                     tile.tileMap.getIfTileExistsOrNull(x, y + 1)?.hasBottomLeftRiver = false
                     tile.tileMap.getIfTileExistsOrNull(x + 1, y)?.hasBottomRightRiver = false
                     tile.tileMap.getIfTileExistsOrNull(x + 1, y + 1)?.hasBottomRiver = false

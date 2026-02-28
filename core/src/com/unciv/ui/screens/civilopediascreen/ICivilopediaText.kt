@@ -7,6 +7,7 @@ import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.RulesetObject
 import com.unciv.models.stats.INamed
 import com.unciv.ui.objectdescriptions.uniquesToCivilopediaTextLines
+import yairm210.purity.annotations.Readonly
 
 /** Addon common to most ruleset game objects managing civilopedia display
  *
@@ -100,12 +101,19 @@ interface ICivilopediaText {
      *  the correct [CivilopediaCategories] member. `entryname` must equal the
      *  [ruleset object name][RulesetObject] as defined by the [INamed] interface.
      */
-    fun makeLink(): String
+    @Readonly fun makeLink(): String
 
     /** Overrides alphabetical sorting in Civilopedia
      *  @param ruleset The current ruleset in case the function needs to do lookups
      */
     fun getSortGroup(ruleset: Ruleset): Int = 0
+
+    /** This can be overridden to add "Subcategory" labels between groups of Civilopedia entries.
+     *  - A new label will be inserted every time this changes and is not null
+     *  - Therefore, in most cases it will be necessary to override [getSortGroup] as well
+     *  @param ruleset The current ruleset in case the function needs to do lookups
+     */
+    fun getSubCategory(ruleset: Ruleset): String? = null
 
     /** Overrides Icon used for Civilopedia entry list (where you select the instance)
      *  This will still be passed to the category-specific image getter.

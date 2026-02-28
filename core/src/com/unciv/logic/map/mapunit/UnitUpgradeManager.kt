@@ -5,6 +5,7 @@ import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.BaseUnit
 import com.unciv.ui.components.extensions.toPercent
 import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsUpgrade
+import yairm210.purity.annotations.Readonly
 import kotlin.math.pow
 
 class UnitUpgradeManager(val unit: MapUnit) {
@@ -16,6 +17,7 @@ class UnitUpgradeManager(val unit: MapUnit) {
      *  @param ignoreResources Ignore resource requirements (tech still counts)
      *          Used to display disabled Upgrade button
      */
+    @Readonly
     fun canUpgrade(
         unitToUpgradeTo: BaseUnit,
         ignoreRequirements: Boolean = false,
@@ -43,6 +45,7 @@ class UnitUpgradeManager(val unit: MapUnit) {
      */
     // Only one use from getUpgradeAction at the moment, so AI-specific rules omitted
     //todo Does the AI never buy upgrades???
+    @Readonly
     fun getCostOfUpgrade(unitToUpgradeTo: BaseUnit): Int {
         // Source rounds to int every step, we don't
         //TODO From the source, this should apply _Production_ modifiers (Temple of Artemis? GameSpeed! StartEra!), at the moment it doesn't
@@ -88,23 +91,22 @@ class UnitUpgradeManager(val unit: MapUnit) {
         //  This prevents this, since we lack another way to do so -_-'  
         if (unit.isDestroyed) return  
             
+        val wasEscorting = unit.isEscorting()
         unit.destroy(destroyTransportedUnit = false)
         val civ = unit.civ
         val position = unit.currentTile.position
-        val newUnit = civ.units.placeUnitNearTile(position, upgradedUnit, unit.id)
+        val newUnit = civ.units.placeUnitNearTile(position, upgradedUnit, unit.id, copiedFrom = unit)
 
         /** We were UNABLE to place the new unit, which means that the unit failed to upgrade!
          * The only known cause of this currently is "land units upgrading to water units" which fail to be placed.
          */
         if (newUnit == null) {
-            val resurrectedUnit = civ.units.placeUnitNearTile(position, unit.baseUnit)!!
-            unit.copyStatisticsTo(resurrectedUnit)
+            civ.units.placeUnitNearTile(position, unit.baseUnit, copiedFrom = unit)!!
             return
         }
 
         // Managed to upgrade
         if (!isFree) civ.addGold(-(goldCostOfUpgrade ?: getCostOfUpgrade(upgradedUnit)))
-        unit.copyStatisticsTo(newUnit)
         newUnit.currentMovement = 0f
         // wake up if lost ability to fortify
         if (newUnit.isFortified() && !newUnit.canFortify(ignoreAlreadyFortified = true))
@@ -112,5 +114,8 @@ class UnitUpgradeManager(val unit: MapUnit) {
         // wake up from Guarding if can't Withdraw
         if (newUnit.isGuarding() && !newUnit.hasUnique(UniqueType.WithdrawsBeforeMeleeCombat))
             newUnit.action = null
+        // Re-escort if it was escorting
+        if (newUnit.currentTile.position == position && wasEscorting)
+            newUnit.startEscorting()
     }
 }

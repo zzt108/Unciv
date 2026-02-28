@@ -26,14 +26,24 @@ import org.junit.runner.notification.RunListener
 import org.junit.runner.notification.RunNotifier
 import org.junit.runners.BlockJUnit4ClassRunner
 import org.junit.runners.model.FrameworkMethod
+import org.junit.runners.parameterized.BlockJUnit4ClassRunnerWithParameters
+import org.junit.runners.parameterized.ParametersRunnerFactory
+import org.junit.runners.parameterized.TestWithParameters
 import org.mockito.Mockito
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.io.PrintStream
 
 
-class GdxTestRunner(klass: Class<*>?) : BlockJUnit4ClassRunner(klass), ApplicationListener {
+class GdxTestRunner(
+    klass: Class<*>?,
+    private val testConfig: TestWithParameters?
+) : BlockJUnit4ClassRunner(klass), ApplicationListener {
+    constructor(klass: Class<*>) : this(klass, null) 
+
     private val invokeInRender: MutableMap<FrameworkMethod, RunNotifier> = HashMap()
+    private val measureDuration = klass?.getAnnotation(MeasureDuration::class.java) != null
+    private val classPrefix = klass?.simpleName?.plus(".") ?: ""
 
     init {
         val conf = HeadlessApplicationConfiguration()
@@ -51,6 +61,8 @@ class GdxTestRunner(klass: Class<*>?) : BlockJUnit4ClassRunner(klass), Applicati
     override fun render() {
         synchronized(invokeInRender) {
             for ((method, notifier) in invokeInRender) {
+                val measure = measureDuration || method.getAnnotation(MeasureDuration::class.java) != null
+                val startTime = System.currentTimeMillis()
                 val redirect = method.getAnnotation(RedirectOutput::class.java)
                     ?.policy
                     ?: RedirectPolicy.ShowOnFailure
@@ -62,6 +74,8 @@ class GdxTestRunner(klass: Class<*>?) : BlockJUnit4ClassRunner(klass), Applicati
                     else ->
                         super.runChild(method, notifier)
                 }
+                if (!measure) continue
+                println("Test $classPrefix${method.name} took ${System.currentTimeMillis() - startTime}ms.")
             }
             invokeInRender.clear()
         }
@@ -122,5 +136,39 @@ class GdxTestRunner(klass: Class<*>?) : BlockJUnit4ClassRunner(klass), Applicati
         } finally {
             System.setOut(oldOutputStream)
         }
+    }
+
+    protected override fun validateConstructor(errors: MutableList<Throwable?>) {
+        validateOnlyOneConstructor(errors)
+        //Removing the validateZeroArgConstructor restriction since we allow parameterized tests.
+    }
+
+    @Throws(Exception::class)
+    protected override fun createTest(): Any? {
+        if (testConfig == null)
+            return super.createTest()
+        return BlockJUnit4ClassRunnerWithParameters(testConfig).createTest()
+    }
+
+    /**
+     * Returns a new fixture to run a particular test `method` against.
+     * Default implementation executes the no-argument [.createTest] method.
+     *
+     * @since 4.13
+     */
+    @Throws(Exception::class)
+    protected override fun createTest(method: FrameworkMethod?): Any? {
+        return createTest()
+    }
+
+    protected override fun testName(method: FrameworkMethod): String {
+        return super.testName(method) + if (testConfig == null) "" else testConfig.parameters.toString()
+    }
+    
+}
+
+class GdxTestRunnerFactory: ParametersRunnerFactory {
+    override fun createRunnerForTestWithParameters(testConfig: TestWithParameters?): GdxTestRunner {
+        return GdxTestRunner(testConfig?.testClass?.javaClass, testConfig)
     }
 }

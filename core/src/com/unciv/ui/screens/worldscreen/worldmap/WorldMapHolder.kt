@@ -19,8 +19,7 @@ import com.unciv.logic.battle.MapUnitCombatant
 import com.unciv.logic.battle.TargetHelper
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
-import com.unciv.logic.map.MapPathing
-import com.unciv.logic.map.TileMap
+import com.unciv.logic.map.*
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.mapunit.movement.UnitMovement
 import com.unciv.logic.map.tile.Tile
@@ -49,6 +48,7 @@ import com.unciv.ui.screens.worldscreen.bottombar.BattleTableHelpers.battleAnima
 import com.unciv.utils.Concurrency
 import com.unciv.utils.Log
 import com.unciv.utils.launchOnGLThread
+import yairm210.purity.annotations.Readonly
 import java.lang.Float.max
 
 
@@ -202,6 +202,7 @@ class WorldMapHolder(
     }
 
     private fun onTileRightClicked(unit: MapUnit, tile: Tile) {
+        if (unit.currentTile.position == tile.position) return
         removeUnitActionOverlay()
         selectedTile = tile
         unitMovementPaths.clear()
@@ -234,7 +235,8 @@ class WorldMapHolder(
                 /** ****** Right-click Attack ****** */
                 val attacker = MapUnitCombatant(unit)
                 if (!Battle.movePreparingAttack(attacker, attackableTile)) return
-                SoundPlayer.play(attacker.getAttackSound())
+                if (!SoundPlayer.play(UncivSound(attacker.getName())))
+                    SoundPlayer.play(attacker.getAttackSound())
                 val (damageToDefender, damageToAttacker) = Battle.attackOrNuke(attacker, attackableTile)
                 if (attackableTile.combatant != null)
                     worldScreen.battleAnimationDeferred(attacker, damageToAttacker, attackableTile.combatant, damageToDefender)
@@ -299,12 +301,19 @@ class WorldMapHolder(
                     // but it's so rare and edge-case-y that ignoring its failure is actually acceptable, hence the empty catch
                     val previousTile = selectedUnit.currentTile
                     selectedUnit.movement.moveToTile(tileToMoveTo)
+                    
+                    // If you try to send a unit to a tile that it can't even get nearer to, then this is actualy a dud
+                    if (previousTile == selectedUnit.currentTile){
+                        removeUnitActionOverlay() // so the user knows the action 'has been performed'
+                        return@launchOnGLThread
+                    }
+                    
                     if (selectedUnit.isExploring() || selectedUnit.isMoving())
                         selectedUnit.action = null // remove explore on manual move
                     SoundPlayer.play(UncivSound.Whoosh)
                     if (selectedUnit.currentTile != targetTile)
                         selectedUnit.action =
-                                "moveTo ${targetTile.position.x.toInt()},${targetTile.position.y.toInt()}"
+                                "moveTo ${targetTile.position.x},${targetTile.position.y}"
                     if (selectedUnit.hasMovement()) worldScreen.bottomUnitTable.selectUnit(selectedUnit)
 
                     worldScreen.shouldUpdate = true
@@ -342,7 +351,8 @@ class WorldMapHolder(
         val unitSpriteAndIcon = Group().apply { setPosition(tileGroup.x, tileGroup.y) }
         val unitSpriteSlot = tileGroup.layerUnitArt.getSpriteSlot(selectedUnit) ?: return
         
-        for (spriteImage in unitSpriteSlot.spriteGroup.children) unitSpriteAndIcon.addActor(spriteImage)
+        for (spriteImage in unitSpriteSlot.spriteGroup.children.toList()) // toList because actors added remove themselves from previous parent  
+            unitSpriteAndIcon.addActor(spriteImage)
         tileGroup.parent.addActor(unitSpriteAndIcon)
 
         
@@ -375,7 +385,7 @@ class WorldMapHolder(
 
     internal fun swapMoveUnitToTargetTile(selectedUnit: MapUnit, targetTile: Tile) {
         markUnitMoveTutorialComplete(selectedUnit)
-        selectedUnit.movement.swapMoveToTile(targetTile)
+        selectedUnit.movement.swapMoveToTile(targetTile, keepEscorting = true)
 
         if (selectedUnit.isExploring() || selectedUnit.isMoving())
             selectedUnit.action = null // remove explore on manual swap-move
@@ -466,7 +476,9 @@ class WorldMapHolder(
                 selectedUnit.civ.hasExplored(tile)
 
             if (validTile) {
-                val roadPath: List<Tile>? = MapPathing.getRoadPath(selectedUnit, selectedUnit.currentTile, tile)
+                val roadPath: List<Tile>? =
+                    if (UncivGame.Current.settings.useAStarPathfinding) selectedUnit.movement.getRoadPath(selectedUnit.getTile())
+                    else MapPathing.getRoadPath(selectedUnit.civ, selectedUnit.getTile(), tile)
                 launchOnGLThread {
                     if (roadPath == null) { // give the regular tile overlays with no road connection
                         addTileOverlays(tile)
@@ -541,6 +553,7 @@ class WorldMapHolder(
     }
 
     /** Returns true when the civ is a human player defeated in singleplayer game */
+    @Readonly
     fun isMapRevealEnabled(viewingCiv: Civilization) = !viewingCiv.gameInfo.gameParameters.isOnlineMultiplayer
             && viewingCiv.isCurrentPlayer()
             && viewingCiv.isDefeated()
@@ -563,7 +576,7 @@ class WorldMapHolder(
      * @param targetVisibleUnits Sequence of [MapUnit]s for which the active movement target can be displayed.
      * @param visibleAttacks Sequence of pairs of [Vector2] positions of the sources and the targets of all attacks that can be displayed.
      * */
-    internal fun updateMovementOverlay(pastVisibleUnits: Sequence<MapUnit>, targetVisibleUnits: Sequence<MapUnit>, visibleAttacks: Sequence<Pair<Vector2, Vector2>>) {
+    internal fun updateMovementOverlay(pastVisibleUnits: Sequence<MapUnit>, targetVisibleUnits: Sequence<MapUnit>, visibleAttacks: Sequence<Pair<HexCoord, HexCoord>>) {
         val selectedUnit = worldScreen.bottomUnitTable.selectedUnit
         for (unit in pastVisibleUnits) {
             if (unit.movementMemories.isEmpty()) continue
@@ -600,7 +613,7 @@ class WorldMapHolder(
      * @param selectUnit Select a unit at the destination
      * @return `true` if scroll position was changed, `false` otherwise
      */
-    fun setCenterPosition(vector: Vector2, immediately: Boolean = false, selectUnit: Boolean = true, forceSelectUnit: MapUnit? = null): Boolean {
+    fun setCenterPosition(vector: HexCoord, immediately: Boolean = false, selectUnit: Boolean = true, forceSelectUnit: MapUnit? = null): Boolean {
         val tileGroup = tileGroups.values.firstOrNull { it.tile.position == vector } ?: return false
         selectedTile = tileGroup.tile
         if (selectUnit || forceSelectUnit != null)

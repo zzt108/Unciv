@@ -7,6 +7,7 @@ import com.unciv.logic.trade.TradeOfferType.TradeTypeNumberType
 import com.unciv.models.ruleset.Speed
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.fonts.Fonts
+import yairm210.purity.annotations.Readonly
 
 data class TradeOffer(val name: String, val type: TradeOfferType, var amount: Int = 1, var duration: Int) : IsPartOfGameInfoSerialization {
 
@@ -18,7 +19,7 @@ data class TradeOffer(val name: String, val type: TradeOfferType, var amount: In
     ) : this(name, type, amount, duration = -1) {
         duration = when {
             type.isImmediate -> -1 // -1 for offers that are immediate (e.g. gold transfer)
-            name == Constants.peaceTreaty -> speed.peaceDealDuration
+            name == Constants.peaceTreaty || type == TradeOfferType.PeaceProposal -> speed.peaceDealDuration
             else -> speed.dealDuration
         }
     }
@@ -26,17 +27,20 @@ data class TradeOffer(val name: String, val type: TradeOfferType, var amount: In
     constructor() : this("", TradeOfferType.Gold, duration = -1) // so that the json deserializer can work
 
     @Suppress("CovariantEquals", "WrongEqualsTypeParameter")    // This is an overload, not an override of the built-in equals(Any?)
+    @Readonly
     fun equals(offer: TradeOffer): Boolean {
         return offer.name == name
                 && offer.type == type
                 && offer.amount == amount
     }
 
-    fun isTradable() = amount > 0
+    @Readonly fun isTradable() = amount > 0
 
+    @Readonly
     fun getOfferText(untradable: Int = 0): String {
         var offerText = when(type) {
             TradeOfferType.WarDeclaration -> "Declare war on [$name]"
+            TradeOfferType.PeaceProposal -> "Make peace with [$name]"
             TradeOfferType.Introduction -> "Introduction to [$name]"
             TradeOfferType.City -> {
                 val city =

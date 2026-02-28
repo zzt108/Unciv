@@ -5,13 +5,14 @@ import com.unciv.logic.city.City
 import com.unciv.models.Counter
 import com.unciv.models.ruleset.Building
 import com.unciv.models.ruleset.INonPerpetualConstruction
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.BaseUnit
 import com.unciv.models.stats.Stat
 import com.unciv.utils.addToMapOfSets
 import com.unciv.utils.contains
 import com.unciv.utils.yieldAllNotNull
+import yairm210.purity.annotations.Readonly
 
 class CivConstructions : IsPartOfGameInfoSerialization {
 
@@ -76,6 +77,7 @@ class CivConstructions : IsPartOfGameInfoSerialization {
      *  Note: Operates on String city.id and String building name, close to the serialized and stored form.
      *  When/if we do a transient cache for these using our objects, please rewrite this.
      */
+    @Readonly
     private fun getFreeBuildingNamesSequence(cityId: String) = sequence {
         yieldAllNotNull(freeBuildings[cityId])
         for (city in civInfo.cities) {
@@ -84,14 +86,17 @@ class CivConstructions : IsPartOfGameInfoSerialization {
     }
 
     /** Gets a Set of all building names the [city] has for free, from nationwide sources or buildings in other cities */
+    @Readonly
     fun getFreeBuildingNames(city: City) =
         getFreeBuildingNamesSequence(city.id).toSet()
 
     /** Tests whether the [city] has [building] for free, from nationwide sources or buildings in other cities */
+    @Readonly
     fun hasFreeBuilding(city: City, building: Building) =
         hasFreeBuildingByName(city.id, building.name)
 
     /** Tests whether a city by [cityId] has a building named [buildingName] for free, from nationwide sources or buildings in other cities */
+    @Readonly
     private fun hasFreeBuildingByName(cityId: String, buildingName: String) =
         getFreeBuildingNamesSequence(cityId).contains(buildingName)
 
@@ -152,13 +157,15 @@ class CivConstructions : IsPartOfGameInfoSerialization {
             .filter { it.hasUnique(UniqueType.GainBuildingWhereBuildable) }
 
         // "Gain a free [buildingName] [cityFilter]"
-        val freeBuildingsFromCiv = civInfo.getMatchingUniques(UniqueType.GainFreeBuildings, StateForConditionals.IgnoreConditionals)
+        val freeBuildingsFromCiv = civInfo.getMatchingUniques(UniqueType.GainFreeBuildings, GameContext.IgnoreConditionals)
         for (city in civInfo.cities) {
-            val freeBuildingsFromCity = city.getLocalMatchingUniques(UniqueType.GainFreeBuildings, StateForConditionals.IgnoreConditionals)
+            val freeBuildingsFromCity = city.getLocalMatchingUniques(UniqueType.GainFreeBuildings, GameContext.IgnoreConditionals)
             val freeBuildingUniques = (freeBuildingsFromCiv + freeBuildingsFromCity)
                 .filter { city.matchesFilter(it.params[1]) && it.conditionalsApply(city.state)
                     && !it.hasTriggerConditional() }
-            for (unique in freeBuildingUniques) {
+            
+            // When adding a building, the list of applicable free buildings can change! Hence, toList()
+            for (unique in freeBuildingUniques.toList()) {
                 val freeBuilding = city.civ.getEquivalentBuilding(unique.params[0])
                 city.cityConstructions.freeBuildingsProvidedFromThisCity.addToMapOfSets(city.id, freeBuilding.name)
 
@@ -179,6 +186,7 @@ class CivConstructions : IsPartOfGameInfoSerialization {
      *  * Built buildings or those in a construction queue
      *  * Units on the map or being constructed
      */
+    @Readonly
     fun countConstructedObjects(objectToCount: INonPerpetualConstruction): Int {
         val amountInSpaceShip = civInfo.victoryManager.currentsSpaceshipParts[objectToCount.name]
 

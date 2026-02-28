@@ -4,6 +4,7 @@ package com.unciv.testing
 import com.badlogic.gdx.Gdx
 import com.unciv.Constants
 import com.unciv.UncivGame
+import com.unciv.logic.GameInfo
 import com.unciv.models.metadata.BaseRuleset
 import com.unciv.models.metadata.GameSettings
 import com.unciv.models.ruleset.Ruleset
@@ -17,10 +18,12 @@ import com.unciv.models.stats.Stats
 import com.unciv.models.translations.getPlaceholderParameters
 import com.unciv.models.translations.getPlaceholderText
 import com.unciv.utils.DebugUtils
+import com.unciv.utils.DefaultLogBackend
 import com.unciv.utils.Log
 import com.unciv.utils.debug
 import org.junit.Assert
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.abs
@@ -29,46 +32,60 @@ import kotlin.random.Random
 @RunWith(GdxTestRunner::class)
 class BasicTests {
 
-    var ruleset = Ruleset()
+    lateinit var ruleset: Ruleset
+
     @Before
-    fun loadTranslations() {
-        Log.shouldLog()
-        RulesetCache.loadRulesets(noMods = true)
-        ruleset = RulesetCache.getVanillaRuleset()
+    fun loadRulesets() {
+        if (RulesetCache.isEmpty())
+            RulesetCache.loadRulesets(noMods = true)
+        ruleset = RulesetCache[BaseRuleset.Civ_V_Vanilla.fullName]!!
+    }
+
+    @Test
+    /**
+     *  Unit tests do not generally need to use Unciv's logger, but can output to console (stdout, println) directly.
+     *  Using `Log` is fine, its formatting capabilities can help, but println with string templating is perfectly fine.
+     *  We also want to be able to see log output of some core routines. So our logger should output directly to console.
+     *  Since tests won't use DesktopLauncher or AndroidLauncher, this is guaranteed - but this test can remind us.
+     */
+    fun testsShouldRunWithDefaultLogBackend () {
+        Assert.assertTrue("Unit tests should run with default Log backend", Log.backend is DefaultLogBackend)
     }
 
     @Test
     fun gamePngExists() {
-        Assert.assertTrue("This test will only pass when the game.png exists",
-                Gdx.files.local("").list().any { it.name().endsWith(".png") })
+        Assert.assertTrue("This test will only pass when any png exists in the atlas location",
+            Gdx.files.local("").list().any { it.name().endsWith(".png") }
+        )
     }
 
     @Test
-    fun loadRuleset() {
+    fun rulesetLoadingWorks() {
         Assert.assertTrue("This test will only pass when the jsons can be loaded",
-                ruleset.buildings.size > 0)
+            ruleset.buildings.isNotEmpty()
+        )
     }
 
     @Test
     fun gameIsNotRunWithDebugModes() {
         val game = UncivGame()
         Assert.assertTrue("This test will only pass if the game is not run with debug modes",
-                !DebugUtils.SUPERCHARGED
-                        && !DebugUtils.VISIBLE_MAP
-                        && DebugUtils.SIMULATE_UNTIL_TURN <= 0
-                        && !game.isConsoleMode
+            !DebugUtils.SUPERCHARGED
+            && !DebugUtils.VISIBLE_MAP
+            && DebugUtils.SIMULATE_UNTIL_TURN <= 0
+            && !game.isConsoleMode
         )
     }
 
     // If there's a unit that obsoletes with no upgrade then when it obsoletes
-// and we try to work on its upgrade, we'll get an exception - see techManager
+    // and we try to work on its upgrade, we'll get an exception - see techManager
     // But...Scout obsoletes at Scientific Theory with no upgrade...?
     @Test
     fun allObsoletingUnitsHaveUpgrades() {
         val units: Collection<BaseUnit> = ruleset.units.values
         var allObsoletingUnitsHaveUpgrades = true
         for (unit in units) {
-            if (unit.techsAtWhichAutoUpgradeInProduction().any() && unit.upgradesTo == null && unit.name !="Scout" ) {
+            if (unit.techsAtWhichAutoUpgradeInProduction().any() && unit.upgradesTo == null && unit.name != "Scout" ) {
                 debug("%s obsoletes but has no upgrade", unit.name)
                 allObsoletingUnitsHaveUpgrades = false
             }
@@ -78,35 +95,34 @@ class BasicTests {
 
     @Test
     fun statParserWorks() {
-        Assert.assertTrue(Stats.isStats("+1 Production"))
-        Assert.assertTrue(Stats.isStats("+1 Gold, +2 Production"))
-        Assert.assertFalse(Stats.isStats("+1 Gold from tree"))
+        UncivGame.Current = UncivGame().apply { settings = GameSettings() } // Stats toString() runs tr()
 
-        val statsThatShouldBe = Stats(gold = 1f, production = 2f)
-        Assert.assertTrue(Stats.parse("+1 Gold, +2 Production").equals(statsThatShouldBe))
+        runTestParcours("Stats isStats", Stats::isStats,
+            "+1 Production", true,
+            "+1 Gold, +2 Production", true,
+            "+1 Gold from tree", false,
+        )
 
-        UncivGame.Current = UncivGame()
-        UncivGame.Current.settings = GameSettings().apply { language = "Italian" }
+        // Can't use `runTestParcours` thanks to the non-standard Stats.equals()
+        Assert.assertTrue(Stats.parse("+1 Gold, +2 Production").equals(Stats(gold = 1f, production = 2f)))
     }
 
     @Test
     fun baseRulesetHasNoBugs() {
-        var hasFailed = false
-        for (baseRuleset in BaseRuleset.entries) {
+        runTestParcours("Base rulesets have no bugs",
+            *BaseRuleset.entries.map { TestCase(it, false) }.toTypedArray()
+        ) { baseRuleset: BaseRuleset ->
             val ruleset = RulesetCache[baseRuleset.fullName]!!
             val modCheck = ruleset.getErrorList()
-            if (modCheck.isNotOK())
-                debug("%s", modCheck.getErrorText(true))
-            hasFailed = hasFailed || modCheck.isNotOK()
+            modCheck.isNotOK()
         }
-        Assert.assertFalse(hasFailed)
     }
 
     @Test
     fun uniqueTypesHaveNoUnknownParameters() {
         var noUnknownParameters = true
         for (uniqueType in UniqueType.entries) {
-            if (uniqueType.getDeprecationAnnotation()!=null) continue
+            if (uniqueType.getDeprecationAnnotation() != null) continue
             for (entry in uniqueType.parameterTypeMap.withIndex()) {
                 for (paramType in entry.value) {
                     if (paramType == UniqueParameterType.Unknown) {
@@ -144,7 +160,7 @@ class BasicTests {
                 }
             }
         }
-        Assert.assertTrue("This test succeeds only if all uniques of units are presented in UniqueType.values()", allOK)
+        Assert.assertTrue("This test succeeds only if all uniques of units are presented in UniqueType.entries", allOK)
     }
 
     @Test
@@ -159,7 +175,7 @@ class BasicTests {
                 }
             }
         }
-        Assert.assertTrue("This test succeeds only if all uniques of buildings are presented in UniqueType.values()", allOK)
+        Assert.assertTrue("This test succeeds only if all uniques of buildings are presented in UniqueType.entries", allOK)
     }
 
     @Test
@@ -174,7 +190,7 @@ class BasicTests {
                 }
             }
         }
-        Assert.assertTrue("This test succeeds only if all uniques of promotions are presented in UniqueType.values()", allOK)
+        Assert.assertTrue("This test succeeds only if all uniques of promotions are presented in UniqueType.entries", allOK)
     }
 
     @Test
@@ -189,7 +205,7 @@ class BasicTests {
                 }
             }
         }
-        Assert.assertTrue("This test succeeds only if all policy uniques are presented in UniqueType.values()", allOK)
+        Assert.assertTrue("This test succeeds only if all policy uniques are presented in UniqueType.entries", allOK)
     }
 
     @Test
@@ -205,7 +221,7 @@ class BasicTests {
                 }
             }
         }
-        Assert.assertTrue("This test succeeds only if all belief uniques are presented in UniqueType.values()", allOK)
+        Assert.assertTrue("This test succeeds only if all belief uniques are presented in UniqueType.entries", allOK)
     }
 
     @Test
@@ -220,7 +236,7 @@ class BasicTests {
                 }
             }
         }
-        Assert.assertTrue("This test succeeds only if all era uniques are presented in UniqueType.values()", allOK)
+        Assert.assertTrue("This test succeeds only if all era uniques are presented in UniqueType.entries", allOK)
     }
 
     @Test
@@ -235,7 +251,7 @@ class BasicTests {
                 }
             }
         }
-        Assert.assertTrue("This test succeeds only if all ruin reward uniques are presented in UniqueType.values()", allOK)
+        Assert.assertTrue("This test succeeds only if all ruin reward uniques are presented in UniqueType.entries", allOK)
     }
 
     @Test
@@ -281,7 +297,8 @@ class BasicTests {
         Assert.assertTrue("This test succeeds only if all deprecated uniques have a replaceWith text that matches an existing type", allOK)
     }
 
-    //@Test  // commented so github doesn't run this
+    @Test
+    @Ignore("so github doesn't run this") 
     fun statMathStressTest() {
         val runtime = Runtime.getRuntime()
         runtime.gc()
@@ -327,5 +344,51 @@ class BasicTests {
                 stats.timesInPlace(0.1f)
         }
         return stats
+    }
+
+    @Test
+    fun turnToYearTest() {
+        // Pretty random choice, but ensures 'turn > last definition' and 'float to int rounding' is tested
+        val testData = mapOf(
+            "Quick" to mapOf(
+                0 to -4000,
+                100 to 800,
+                200 to 1860,
+                300 to 2020,
+                5000 to 6720
+            ),
+            "Standard" to mapOf(
+                99 to -400,
+                479 to 2039,
+                999 to 2299
+            ),
+            "Epic" to mapOf(
+                66 to -2350,
+                666 to 2008,
+                4242 to 3796
+            ),
+            "Marathon" to mapOf(
+                222 to -1280,
+                1111 to 1978,
+                1400 to 2041
+            ),
+        )
+        val gameInfo = GameInfo()
+        gameInfo.ruleset = ruleset
+        Assert.assertEquals(0, ruleset.eras[gameInfo.gameParameters.startingEra]!!.startPercent)
+        var fails = 0
+
+        for ((speedName, tests) in testData) {
+            val speed = ruleset.speeds[speedName]!!
+            gameInfo.speed = speed
+            for ((turn, expected) in tests) {
+                val actual = gameInfo.getYear(turn)
+                if (actual == expected) continue
+                println("speed: $speedName, turn: $turn, expected: $expected, actual: $actual")
+                fails++
+            }
+        }
+
+        Assert.assertEquals("Some turn to year conversions do not match", 0, fails)
     }
 }

@@ -9,6 +9,8 @@ import com.unciv.models.ruleset.INonPerpetualConstruction
 import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.stats.Stat
+import yairm210.purity.annotations.LocalState
+import yairm210.purity.annotations.Readonly
 import java.util.*
 
 object UseGoldAutomation {
@@ -18,16 +20,17 @@ object UseGoldAutomation {
     fun useGold(civ: Civilization) {
         for (unit in civ.units.getCivUnits())
             UnitAutomation.tryUpgradeUnit(unit)
-        
+
         if (civ.isMajorCiv())
             useGoldForCityStates(civ)
 
-        for (city in civ.cities.sortedByDescending { it.population.population }) {
+        for (city in civ.cities.sortedByDescending { it.cityStats.currentCityStats.production }) {
+            // Low production cities are disallowed from building military and world wonders, and have low priority for xp buildings
             val construction = city.cityConstructions.getCurrentConstruction()
             if (construction !is INonPerpetualConstruction) continue
             val statBuyCost = construction.getStatBuyCost(city, Stat.Gold) ?: continue
             if (!city.cityConstructions.isConstructionPurchaseAllowed(construction, Stat.Gold, statBuyCost)) continue
-            if (civ.gold < statBuyCost * 3) continue
+            if (civ.gold < statBuyCost || construction.hurryCostModifier > 10) continue // Don't buy things that are more expensive than they need to be
             city.cityConstructions.purchaseConstruction(construction, 0, true)
         }
 
@@ -51,7 +54,7 @@ object UseGoldAutomation {
 
         if (civ.gold < 500 || knownCityStates.none()) return // skip checks if tryGainInfluence will bail anyway
         val cityState = knownCityStates
-            .filter { it.getAllyCiv() != civ.civName }
+            .filter { it.allyCiv != civ }
             .associateWith { NextTurnAutomation.valueCityStateAlliance(civ, it, true) }
             .maxByOrNull { it.value }?.takeIf { it.value > 0 }?.key
         if (cityState != null) {
@@ -112,46 +115,51 @@ object UseGoldAutomation {
         }
     }
 
+    @Readonly
     private fun getHighlyDesirableTilesToCityMap(civInfo: Civilization): SortedMap<Tile, MutableSet<City>> {
         val highlyDesirableTiles: SortedMap<Tile, MutableSet<City>> = TreeMap(
             compareByDescending<Tile?> { it?.naturalWonder != null }
-                .thenByDescending { it?.resource != null && it.tileResource.resourceType == ResourceType.Luxury }
-                .thenByDescending { it?.resource != null && it.tileResource.resourceType == ResourceType.Strategic }
+                .thenByDescending { it?.tileResource?.resourceType == ResourceType.Luxury }
+                .thenByDescending { it?.tileResource?.resourceType == ResourceType.Strategic }
                 // This is necessary, so that the map keeps Tiles with the same resource as two
                 // separate entries.
                 .thenBy { it.hashCode() }
         )
 
         for (city in civInfo.cities.filter { !it.isPuppet && !it.isBeingRazed }) {
-            val highlyDesirableTilesInCity = city.tilesInRange.filter {
+            val highlyDesirableTilesInCity = city.getCenterTile().getTilesAtDistance(2).filter {
+                // Only consider second ring tiles: further tiles may be as good or better, but have much higher gold cost 
                 isHighlyDesirableTile(it, civInfo, city)
             }
             for (highlyDesirableTileInCity in highlyDesirableTilesInCity) {
-                highlyDesirableTiles.getOrPut(highlyDesirableTileInCity) { mutableSetOf() }
-                    .add(city)
+                @LocalState val desirableTiles = highlyDesirableTiles.getOrPut(highlyDesirableTileInCity) { mutableSetOf() }
+                desirableTiles.add(city)
             }
         }
         return highlyDesirableTiles
     }
 
+    @Readonly
     private fun isHighlyDesirableTile(it: Tile, civInfo: Civilization, city: City): Boolean {
         if (!it.isVisible(civInfo)) return false
         if (it.getOwner() != null) return false
         if (it.neighbors.none { neighbor -> neighbor.getCity() == city }) return false
 
-        fun hasNaturalWonder() = it.naturalWonder != null
+        @Readonly fun hasNaturalWonder() = it.naturalWonder != null
 
-        fun hasLuxuryCivDoesntOwn() =
-            it.hasViewableResource(civInfo)
-                && it.tileResource.resourceType == ResourceType.Luxury
-                && !civInfo.hasResource(it.resource!!)
+        @Readonly  fun hasLuxury(): Boolean {
+            val resource = it.tileResource
+            return civInfo.canSeeResource(resource) &&
+                resource.resourceType == ResourceType.Luxury &&
+                civInfo.getResourceAmount(resource) < 2 // At 2 or more, we haven't been able to trade it away for another duplicate...
+        }
 
-        fun hasResourceCivHasNoneOrLittle() =
-            it.hasViewableResource(civInfo)
-                && it.tileResource.resourceType == ResourceType.Strategic
-                && civInfo.getResourceAmount(it.resource!!) <= 3
+        @Readonly fun hasHighYields(): Boolean {
+            val tileStats = it.stats.getTileStats(civInfo)
+            return tileStats.food + tileStats.production >= 3
+        }
 
-        return (hasNaturalWonder() || hasLuxuryCivDoesntOwn() || hasResourceCivHasNoneOrLittle())
+        return (hasNaturalWonder() || hasLuxury() || hasHighYields())
     }
 
     private fun tryGainInfluence(civInfo: Civilization, cityState: Civilization) {

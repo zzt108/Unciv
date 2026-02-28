@@ -20,7 +20,6 @@ import com.badlogic.gdx.utils.Align
 import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.logic.event.EventBus
-import com.unciv.ui.components.widgets.AutoScrollPane
 import com.unciv.ui.components.extensions.addSeparator
 import com.unciv.ui.components.extensions.center
 import com.unciv.ui.components.extensions.darken
@@ -31,7 +30,7 @@ import com.unciv.ui.components.input.KeyboardBinding
 import com.unciv.ui.components.input.KeyboardBindings
 import com.unciv.ui.components.input.keyShortcuts
 import com.unciv.ui.components.input.onActivation
-import com.unciv.ui.popups.Popup.Scrollability
+import com.unciv.ui.components.widgets.AutoScrollPane
 import com.unciv.ui.popups.Popup.Scrollability.All
 import com.unciv.ui.popups.Popup.Scrollability.None
 import com.unciv.ui.popups.Popup.Scrollability.WithoutButtons
@@ -281,8 +280,8 @@ open class Popup(
      * @param text The caption text.
      * @param size The font size for the label.
      */
-    fun addGoodSizedLabel(text: String, size: Int = Constants.defaultFontSize, hideIcons:Boolean = false): Cell<Label> {
-        val label = text.toLabel(fontSize = size, hideIcons = hideIcons)
+    fun addGoodSizedLabel(text: String, size: Int = Constants.defaultFontSize, hideIcons:Boolean = false, color: Color = Color.WHITE): Cell<Label> {
+        val label = text.toLabel(fontSize = size, hideIcons = hideIcons, fontColor = color)
         label.wrap = true
         label.setAlignment(Align.center)
         return add(label).width(stageToShowOn.width / 2)

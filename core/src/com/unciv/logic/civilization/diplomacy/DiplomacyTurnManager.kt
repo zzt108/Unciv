@@ -9,6 +9,7 @@ import com.unciv.logic.trade.TradeOffer
 import com.unciv.logic.trade.TradeOfferType
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.ui.components.extensions.toPercent
+import yairm210.purity.annotations.Readonly
 import kotlin.math.absoluteValue
 import kotlin.math.max
 import kotlin.math.min
@@ -21,8 +22,10 @@ object DiplomacyTurnManager {
         updateHasOpenBorders()
         nextTurnDiplomaticModifiers()
         nextTurnFlags()
-        if (civInfo.isCityState && otherCiv().isMajorCiv())
+        if (civInfo.isCityState && otherCiv.isMajorCiv())
             nextTurnCityStateInfluence()
+        if (civInfo.isMajorCiv())
+            saveSmoothedOpinionOfOtherCiv()
     }
 
     private fun DiplomacyManager.removeUntenableTrades() {
@@ -39,7 +42,7 @@ object DiplomacyTurnManager {
                 ) {
 
                     trades.remove(trade)
-                    val otherCivTrades = otherCiv().getDiplomacyManager(civInfo)!!.trades
+                    val otherCivTrades = otherCiv.getDiplomacyManager(civInfo)!!.trades
                     otherCivTrades.removeAll { it.equalTrade(trade.reverse()) }
 
                     // Can't cut short peace treaties!
@@ -47,11 +50,11 @@ object DiplomacyTurnManager {
                         remakePeaceTreaty(trade.theirOffers.first { it.name == Constants.peaceTreaty }.duration)
                     }
 
-                    civInfo.addNotification("One of our trades with [$otherCivName] has been cut short",
-                        DiplomacyAction(otherCivName, true),
-                        NotificationCategory.Trade, NotificationIcon.Trade, otherCivName)
-                    otherCiv().addNotification("One of our trades with [${civInfo.civName}] has been cut short",
-                        DiplomacyAction(civInfo.civName, true),
+                    civInfo.addNotification("One of our trades with [${otherCiv.civName}] has been cut short",
+                        DiplomacyAction(otherCiv, true),
+                        NotificationCategory.Trade, NotificationIcon.Trade, otherCiv.civName)
+                    otherCiv.addNotification("One of our trades with [${civInfo.civName}] has been cut short",
+                        DiplomacyAction(civInfo, true),
                         NotificationCategory.Trade, NotificationIcon.Trade, civInfo.civName)
                     // If you cut a trade short, we're not going to trust you with per-turn trades for a while
                     otherCivDiplomacy().setFlag(DiplomacyFlags.ResourceTradesCutShort, civInfo.gameInfo.speed.dealDuration * 2)
@@ -70,7 +73,7 @@ object DiplomacyTurnManager {
             TradeOffer(Constants.peaceTreaty, TradeOfferType.Treaty, duration = durationLeft)
         )
         trades.add(treaty)
-        otherCiv().getDiplomacyManager(civInfo)!!.trades.add(treaty)
+        otherCiv.getDiplomacyManager(civInfo)!!.trades.add(treaty)
     }
 
 
@@ -93,28 +96,28 @@ object DiplomacyTurnManager {
             val notificationActions = civInfo.cityStateFunctions.getNotificationActions()
             if (getTurnsToRelationshipChange() == 1) {
                 val text = "Your relationship with [${civInfo.civName}] is about to degrade"
-                otherCiv().addNotification(text, notificationActions, NotificationCategory.Diplomacy, civInfo.civName, NotificationIcon.Diplomacy)
+                otherCiv.addNotification(text, notificationActions, NotificationCategory.Diplomacy, civInfo.civName, NotificationIcon.Diplomacy)
             }
 
             if (initialRelationshipLevel >= RelationshipLevel.Friend && initialRelationshipLevel != relationshipIgnoreAfraid()) {
                 val text = "Your relationship with [${civInfo.civName}] degraded"
-                otherCiv().addNotification(text, notificationActions, NotificationCategory.Diplomacy, civInfo.civName, NotificationIcon.Diplomacy)
+                otherCiv.addNotification(text, notificationActions, NotificationCategory.Diplomacy, civInfo.civName, NotificationIcon.Diplomacy)
             }
 
             // Potentially notify about afraid status
             if (getInfluence() < 30  // We usually don't want to bully our friends
                 && !hasFlag(DiplomacyFlags.NotifiedAfraid)
-                && civInfo.cityStateFunctions.getTributeWillingness(otherCiv()) > 0
-                && otherCiv().isMajorCiv()
+                && civInfo.cityStateFunctions.getTributeWillingness(otherCiv) > 0
+                && otherCiv.isMajorCiv()
             ) {
                 setFlag(DiplomacyFlags.NotifiedAfraid, 20)  // Wait 20 turns until next reminder
                 val text = "[${civInfo.civName}] is afraid of your military power!"
-                otherCiv().addNotification(text, notificationActions, NotificationCategory.Diplomacy, civInfo.civName, NotificationIcon.Diplomacy)
+                otherCiv.addNotification(text, notificationActions, NotificationCategory.Diplomacy, civInfo.civName, NotificationIcon.Diplomacy)
             }
         }
     }
 
-
+    @Readonly
     private fun DiplomacyManager.getCityStateInfluenceRecovery(): Float {
         if (getInfluence() >= getCityStateInfluenceRestingPoint())
             return 0f
@@ -123,12 +126,12 @@ object DiplomacyTurnManager {
 
         var modifierPercent = 0f
 
-        if (otherCiv().hasUnique(UniqueType.CityStateInfluenceRecoversTwiceNormalRate))
+        if (otherCiv.hasUnique(UniqueType.CityStateInfluenceRecoversTwiceNormalRate))
             modifierPercent += 100f
 
         val religion = if (civInfo.cities.isEmpty() || civInfo.getCapital() == null) null
         else civInfo.getCapital()!!.religion.getMajorityReligionName()
-        if (religion != null && religion == otherCiv().religionManager.religion?.name)
+        if (religion != null && religion == otherCiv.religionManager.religion?.name)
             modifierPercent += 50f  // 50% quicker recovery when sharing a religion
 
         return max(0f, increment) * max(0f, modifierPercent).toPercent()
@@ -140,8 +143,8 @@ object DiplomacyTurnManager {
             flagsCountdown[flag] = flagsCountdown[flag]!! - 1
 
             // If we have uniques that make city states grant military units faster when at war with a common enemy, add higher numbers to this flag
-            if (flag == DiplomacyFlags.ProvideMilitaryUnit.name && civInfo.isMajorCiv() && otherCiv().isCityState &&
-                civInfo.gameInfo.civilizations.any { civInfo.isAtWarWith(it) && otherCiv().isAtWarWith(it) }) {
+            if (flag == DiplomacyFlags.ProvideMilitaryUnit.name && civInfo.isMajorCiv() && otherCiv.isCityState &&
+                civInfo.gameInfo.civilizations.any { civInfo.isAtWarWith(it) && otherCiv.isAtWarWith(it) }) {
                 for (unique in civInfo.getMatchingUniques(UniqueType.CityStateMoreGiftedUnits)) {
                     flagsCountdown[DiplomacyFlags.ProvideMilitaryUnit.name] =
                         flagsCountdown[DiplomacyFlags.ProvideMilitaryUnit.name]!! - unique.params[0].toInt() + 1
@@ -181,19 +184,14 @@ object DiplomacyTurnManager {
                     // This is confusingly named - in fact, the civ that has the flag set is the MAJOR civ
                     DiplomacyFlags.ProvideMilitaryUnit.name -> {
                         // Do not unset the flag - they may return soon, and we'll continue from that point on
-                        if (civInfo.cities.isEmpty() || otherCiv().cities.isEmpty())
+                        if (civInfo.cities.isEmpty() || otherCiv.cities.isEmpty())
                             continue@loop
                         else
-                            otherCiv().cityStateFunctions.giveMilitaryUnitToPatron(civInfo)
+                            otherCiv.cityStateFunctions.giveMilitaryUnitToPatron(civInfo)
                     }
-                    DiplomacyFlags.AgreedToNotSettleNearUs.name -> {
-                        addModifier(DiplomaticModifiers.FulfilledPromiseToNotSettleCitiesNearUs, 10f)
-                    }
-                    DiplomacyFlags.AgreedToNotSettleNearUs.name -> {
-                        addModifier(DiplomaticModifiers.FulfilledPromiseToNotSpreadReligion, 10f)
-                    }
+                    
                     DiplomacyFlags.RecentlyAttacked.name -> {
-                        civInfo.cityStateFunctions.askForUnitGifts(otherCiv())
+                        civInfo.cityStateFunctions.askForUnitGifts(otherCiv)
                     }
                     // These modifiers don't tick down normally, instead there is a threshold number of turns
                     DiplomacyFlags.RememberDestroyedProtectedMinor.name -> {    // 125
@@ -207,6 +205,11 @@ object DiplomacyTurnManager {
                     }
                     DiplomacyFlags.RememberSidedWithProtectedMinor.name -> {      // 25
                         removeModifier(DiplomaticModifiers.SidedWithProtectedMinor)
+                    }
+                    else -> {
+                        for (demand in Demand.entries){
+                            if (demand.agreedToDemand.name == flag) addModifier(demand.fulfilledPromiseDiplomacyModifier, 10f)
+                        }
                     }
                 }
 
@@ -224,7 +227,7 @@ object DiplomacyTurnManager {
         // https://forums.civfanatics.com/resources/research-agreements-bnw.25568/
         val scienceFromResearchAgreement = min(totalOfScienceDuringRA, otherCivDiplomacy().totalOfScienceDuringRA)
         civInfo.tech.scienceFromResearchAgreements += scienceFromResearchAgreement
-        otherCiv().tech.scienceFromResearchAgreements += scienceFromResearchAgreement
+        otherCiv.tech.scienceFromResearchAgreements += scienceFromResearchAgreement
         totalOfScienceDuringRA = 0
         otherCivDiplomacy().totalOfScienceDuringRA = 0
     }
@@ -239,9 +242,9 @@ object DiplomacyTurnManager {
                 trades.remove(trade)
                 for (offer in trade.ourOffers.union(trade.theirOffers).filter { it.duration == 0 }) { // this was a timed trade
                     val direction = if (offer in trade.theirOffers) "from" else "to"
-                    civInfo.addNotification("[${offer.name}] $direction [$otherCivName] has ended",
-                        DiplomacyAction(otherCivName, true),
-                        NotificationCategory.Trade, otherCivName, NotificationIcon.Trade)
+                    civInfo.addNotification("[${offer.name}] $direction [${otherCiv.civName}] has ended",
+                        DiplomacyAction(otherCiv, true),
+                        NotificationCategory.Trade, otherCiv.civName, NotificationIcon.Trade)
 
                     civInfo.updateStatsForNextTurn() // if they were bringing us gold per turn
                     if (trade.theirOffers.union(trade.ourOffers) // if resources were involved
@@ -253,28 +256,27 @@ object DiplomacyTurnManager {
             for (offer in trade.theirOffers.filter { it.duration <= 3 })
             {
                 if (offer.duration == 3)
-                    civInfo.addNotification("[${offer.name}] from [$otherCivName] will end in [3] turns",
-                        DiplomacyAction(otherCivName, true),
-                        NotificationCategory.Trade, otherCivName, NotificationIcon.Trade)
+                    civInfo.addNotification("[${offer.name}] from [${otherCiv.civName}] will end in [3] turns",
+                        DiplomacyAction(otherCiv, true),
+                        NotificationCategory.Trade, otherCiv.civName, NotificationIcon.Trade)
                 else if (offer.duration == 1)
-                    civInfo.addNotification("[${offer.name}] from [$otherCivName] will end next turn",
-                        DiplomacyAction(otherCivName, true),
-                        NotificationCategory.Trade, otherCivName, NotificationIcon.Trade)
+                    civInfo.addNotification("[${offer.name}] from [${otherCiv.civName}] will end next turn",
+                        DiplomacyAction(otherCiv, true),
+                        NotificationCategory.Trade, otherCiv.civName, NotificationIcon.Trade)
             }
         }
     }
 
     private fun DiplomacyManager.nextTurnDiplomaticModifiers() {
-        if (diplomaticStatus == DiplomaticStatus.Peace) {
-            if (getModifier(DiplomaticModifiers.YearsOfPeace) < 30)
-                addModifier(DiplomaticModifiers.YearsOfPeace, 0.5f)
-        } else revertToZero(DiplomaticModifiers.YearsOfPeace, 0.5f) // war makes you forget the good ol' days
+        if (diplomaticStatus == DiplomaticStatus.Peace)
+            accumulateToAtMost(DiplomaticModifiers.YearsOfPeace, 0.5f, 30f)
+        else
+            revertToZero(DiplomaticModifiers.YearsOfPeace, 0.5f) // war makes you forget the good ol' days
 
         var openBorders = 0
         if (hasOpenBorders) openBorders += 1
-
         if (otherCivDiplomacy().hasOpenBorders) openBorders += 1
-        if (openBorders > 0) addModifier(DiplomaticModifiers.OpenBorders, openBorders / 8f) // so if we both have open borders it'll grow by 0.25 per turn
+        if (openBorders > 0) accumulateToAtMost(DiplomaticModifiers.OpenBorders, openBorders / 8f) // so if we both have open borders it'll grow by 0.25 per turn
         else revertToZero(DiplomaticModifiers.OpenBorders, 1 / 8f)
 
         // Negatives
@@ -284,8 +286,12 @@ object DiplomacyTurnManager {
         revertToZero(DiplomaticModifiers.BetrayedDeclarationOfFriendship, 1 / 8f) // That's a bastardly thing to do
         revertToZero(DiplomaticModifiers.BetrayedDefensivePact, 1 / 16f) // That's an outrageous thing to do
         revertToZero(DiplomaticModifiers.RefusedToNotSettleCitiesNearUs, 1 / 4f)
-        revertToZero(DiplomaticModifiers.BetrayedPromiseToNotSettleCitiesNearUs, 1 / 8f) // That's a bastardly thing to do
-        revertToZero(DiplomaticModifiers.BetrayedPromiseToNotSpreadReligionToUs, 1 / 8f)
+        revertToZero(DiplomaticModifiers.BulliedProtectedMinor, 1 / 2f) // Decays at same rate as warmongering
+        revertToZero(DiplomaticModifiers.AttackedProtectedMinor, 1 / 2f) // Decays at same rate as warmongering
+        revertToZero(DiplomaticModifiers.DestroyedProtectedMinor, 1 / 4f) // Decays slower, similar to capturing cities
+        for (demand in Demand.entries) {
+            revertToZero(demand.betrayedPromiseDiplomacyMpodifier, 1 / 8f)
+        }
         revertToZero(DiplomaticModifiers.UnacceptableDemands, 1 / 4f)
         revertToZero(DiplomaticModifiers.StealingTerritory, 1 / 4f)
         revertToZero(DiplomaticModifiers.DenouncedOurAllies, 1 / 4f)
@@ -329,7 +335,7 @@ object DiplomacyTurnManager {
         if (!hasFlag(DiplomacyFlags.DefensivePact))
             revertToZero(DiplomaticModifiers.DefensivePact, 1f)
 
-        if (!otherCiv().isCityState) return
+        if (!otherCiv.isCityState) return
 
         if (isRelationshipLevelLT(RelationshipLevel.Friend)) {
             if (hasFlag(DiplomacyFlags.ProvideMilitaryUnit))
@@ -339,8 +345,8 @@ object DiplomacyTurnManager {
 
         val variance = listOf(-1, 0, 1).random()
 
-        val provideMilitaryUnitUniques = civInfo.cityStateFunctions
-            .getCityStateBonuses(otherCiv().cityStateType, relationshipIgnoreAfraid(), UniqueType.CityStateMilitaryUnits)
+        val provideMilitaryUnitUniques = CityStateFunctions
+            .getCityStateBonuses(otherCiv.cityStateType, relationshipIgnoreAfraid(), UniqueType.CityStateMilitaryUnits)
             .filter { it.conditionalsApply(civInfo.state) }.toList()
         if (provideMilitaryUnitUniques.isEmpty()) removeFlag(DiplomacyFlags.ProvideMilitaryUnit)
 
@@ -352,13 +358,33 @@ object DiplomacyTurnManager {
         }
     }
 
+    /**
+     * Uses Quick speed as baseline for turn based adjustment of diplomatic modifiers.
+     * This way, the values set in [nextTurnDiplomaticModifiers] will apply 1:1 to Quick speed, which is the most popular speed.
+     */
+    private const val SPEED_ADJUSTMENT_NORMALIZATION_FACTOR = 0.67f
+
     /** @param amount always positive, so you don't need to think about it */
     private fun DiplomacyManager.revertToZero(modifier: DiplomaticModifiers, amount: Float) {
         if (!hasModifier(modifier)) return
         val currentAmount = getModifier(modifier)
-        if (amount >= currentAmount.absoluteValue) diplomaticModifiers.remove(modifier.name)
-        else if (currentAmount > 0) addModifier(modifier, -amount)
-        else addModifier(modifier, amount)
+        val speedAdjustedAmount = SPEED_ADJUSTMENT_NORMALIZATION_FACTOR * amount / civInfo.gameInfo.speed.modifier
+        if (speedAdjustedAmount >= currentAmount.absoluteValue) diplomaticModifiers.remove(modifier.name)
+        else if (currentAmount > 0) addModifier(modifier, -speedAdjustedAmount)
+        else addModifier(modifier, speedAdjustedAmount)
     }
 
+    /**
+     * @param amount should always be positive
+     * @param maxAmount modifier value will not increase beyond this value
+     */
+    private fun DiplomacyManager.accumulateToAtMost(modifier: DiplomaticModifiers, amount: Float, maxAmount: Float = Float.MAX_VALUE) {
+        val currentAmount = getModifier(modifier)
+        // no effect if >= max
+        if (currentAmount >= maxAmount) return
+        val speedAdjustedAmount = SPEED_ADJUSTMENT_NORMALIZATION_FACTOR * amount / civInfo.gameInfo.speed.modifier
+        // do not increase beyond max
+        if (speedAdjustedAmount >= maxAmount - currentAmount) setModifier(modifier, maxAmount)
+        else addModifier(modifier, speedAdjustedAmount)
+    }
 }

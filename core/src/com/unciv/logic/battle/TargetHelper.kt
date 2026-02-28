@@ -5,10 +5,12 @@ import com.unciv.logic.city.City
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.mapunit.movement.PathsToTilesWithinTurn
 import com.unciv.logic.map.tile.Tile
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
+import yairm210.purity.annotations.Readonly
 
 object TargetHelper {
+    @Readonly
     fun getAttackableEnemies(
         unit: MapUnit,
         unitDistanceToTiles: PathsToTilesWithinTurn,
@@ -68,6 +70,7 @@ object TargetHelper {
         return attackableTiles
     }
 
+    @Readonly
     private fun getTilesToAttackFromWhenUnitMoves(unitDistanceToTiles: PathsToTilesWithinTurn, unitMustBeSetUp: Boolean, unit: MapUnit) =
         unitDistanceToTiles.asSequence()
             .map { (tile, distance) ->
@@ -86,6 +89,7 @@ object TargetHelper {
                 it.first == unit.getTile() || unit.movement.canMoveTo(it.first)
             }
 
+    @Readonly
     private fun tileContainsAttackableEnemy(unit: MapUnit, tile: Tile, tilesToCheck: List<Tile>?): Boolean {
         if (tile !in (tilesToCheck ?: unit.civ.viewableTiles) || !containsAttackableEnemy(tile, MapUnitCombatant(unit)) )
             return false
@@ -94,6 +98,7 @@ object TargetHelper {
         return (!unit.baseUnit.isMelee() || mapCombatant !is MapUnitCombatant || !mapCombatant.unit.isCivilian() || unit.movement.canPassThrough(tile))
     }
 
+    @Readonly
     fun containsAttackableEnemy(tile: Tile, combatant: ICombatant): Boolean {
         if (combatant is MapUnitCombatant && combatant.unit.isEmbarked() && !combatant.hasUnique(UniqueType.AttackOnSea)) {
             // Can't attack water units while embarked, only land
@@ -115,20 +120,20 @@ object TargetHelper {
 
         
         if (combatant is MapUnitCombatant) {
-            val stateForConditionals = StateForConditionals(
-                unit = (combatant as? MapUnitCombatant)?.unit, tile = tile, 
+            val gameContext = GameContext(
+                unit = combatant.unit, tile = tile, 
                 ourCombatant = combatant, theirCombatant = tileCombatant, combatAction = CombatAction.Attack)
 
-            if (combatant.hasUnique(UniqueType.CannotAttack, stateForConditionals))
+            if (combatant.hasUnique(UniqueType.CannotAttack, gameContext))
                 return false
 
-            if (combatant.unit.getMatchingUniques(UniqueType.CanOnlyAttackUnits, stateForConditionals).run {
+            if (combatant.unit.getMatchingUniques(UniqueType.CanOnlyAttackUnits, gameContext).run {
                     any() && none { tileCombatant.matchesFilter(it.params[0]) }
                 }
             )
                 return false
 
-            if (combatant.unit.getMatchingUniques(UniqueType.CanOnlyAttackTiles, stateForConditionals).run {
+            if (combatant.unit.getMatchingUniques(UniqueType.CanOnlyAttackTiles, gameContext).run {
                     any() && none { tile.matchesFilter(it.params[0]) }
                 }
             )
@@ -138,14 +143,14 @@ object TargetHelper {
         // Only units with the right unique can view submarines (or other invisible units) from more then one tile away.
         // Garrisoned invisible units can be attacked by anyone, as else the city will be in invincible.
         if (tileCombatant.isInvisible(combatant.getCivInfo()) && !tile.isCityCenter()) {
-            return combatant is MapUnitCombatant
-                && combatant.getCivInfo().viewableInvisibleUnitsTiles.map { it.position }.contains(tile.position)
+            return combatant.getCivInfo().viewableInvisibleUnitsTiles.map { it.position }.contains(tile.position)
         }
         
         return true
     }
 
     /** Get a list of visible tiles which have something attackable */
+    @Readonly
     fun getBombardableTiles(city: City): Sequence<Tile> =
             city.getCenterTile().getTilesInDistance(city.getBombardRange())
                     .filter { it.isVisible(city.civ) && containsAttackableEnemy(it, CityCombatant(city)) }

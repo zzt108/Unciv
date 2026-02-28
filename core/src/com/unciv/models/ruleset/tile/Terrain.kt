@@ -6,12 +6,14 @@ import com.unciv.logic.MultiFilter
 import com.unciv.models.ruleset.Belief
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.RulesetStatsObject
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueTarget
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.ui.components.extensions.colorFromRGB
 import com.unciv.ui.objectdescriptions.uniquesToCivilopediaTextLines
 import com.unciv.ui.screens.civilopediascreen.FormattedLine
+import yairm210.purity.annotations.Cache
+import yairm210.purity.annotations.Readonly
 
 class Terrain : RulesetStatsObject() {
 
@@ -47,6 +49,7 @@ class Terrain : RulesetStatsObject() {
     var damagePerTurn = 0
 
     // Shouldn't this just be a lazy property so it's automatically cached?
+    @Readonly
     fun isRough(): Boolean = hasUnique(UniqueType.RoughTerrain)
 
     /** Tests base terrains, features and natural wonders whether they should be treated as Land/Water.
@@ -62,6 +65,7 @@ class Terrain : RulesetStatsObject() {
         || ruleset.terrains[this.turnsInto]?.type == asType
 
     /** Gets a new [Color] instance from the [RGB] property, mutation e.g. via [Color.lerp] allowed */
+    @Readonly
     fun getColor(): Color { // Can't be a lazy initialize, see above
         if (RGB == null) return Color.GOLD.cpy()
         return colorFromRGB(RGB!!)
@@ -157,33 +161,44 @@ class Terrain : RulesetStatsObject() {
         return textList
     }
 
-    /** Terrain filter matching is "pure" - input always returns same output, and it's called a bajillion times */
-    val cachedMatchesFilterResult = HashMap<String, Boolean>()
+    override fun getSortGroup(ruleset: Ruleset) = type.ordinal
+    override fun getSubCategory(ruleset: Ruleset): String? = when (type) {
+        TerrainType.Land -> "Land"
+        TerrainType.Water -> "Water"
+        TerrainType.TerrainFeature -> "Features"
+        TerrainType.NaturalWonder -> "Natural Wonders"
+    }
 
-    fun matchesFilter(filter: String, state: StateForConditionals? = null, multiFilter: Boolean = true): Boolean {
+    /** Terrain filter matching is "pure" - input always returns same output, and it's called a bajillion times */
+    @Cache private val cachedMatchesFilterResult = HashMap<String, Boolean>()
+
+    @Readonly
+    fun matchesFilter(filter: String, state: GameContext? = null, multiFilter: Boolean = true): Boolean {
         return if (multiFilter) MultiFilter.multiFilter(filter, {
             cachedMatchesFilterResult.getOrPut(it) { matchesSingleFilter(it) } ||
-                state != null && hasUnique(it, state) ||
+                state != null && hasTagUnique(it, state) ||
                 state == null && hasTagUnique(it)
         })
         else cachedMatchesFilterResult.getOrPut(filter) { matchesSingleFilter(filter) } ||
-            state != null && hasUnique(filter, state) ||
+            state != null && hasTagUnique(filter, state) ||
             state == null && hasTagUnique(filter)
     }
 
     /** Implements [UniqueParameterType.TerrainFilter][com.unciv.models.ruleset.unique.UniqueParameterType.TerrainFilter] */
+    @Readonly
     fun matchesSingleFilter(filter: String): Boolean {
         return when (filter) {
-            in Constants.all -> true
-            name -> true
+            "all", "All" -> true
             "Terrain" -> true
             "Open terrain" -> !isRough()
             "Rough terrain" -> isRough()
-            type.name -> true
             "Natural Wonder" -> type == TerrainType.NaturalWonder
             "Terrain Feature" -> type == TerrainType.TerrainFeature
-
-            else -> false
+            else -> when(filter){ // non-constants
+                name -> true
+                type.name -> true
+                else -> false
+            }
         }
     }
 

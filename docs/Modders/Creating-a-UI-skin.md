@@ -20,7 +20,7 @@ There are 6 basic shapes which can be placed inside the `Images/Skins/MyCoolSkin
  - select-box
  - select-box-pressed
 
-These shapes are used all over Unciv and can be replaced to make a lot of UI elements change appearance at once. To change just one specific element use the [table](Creating-a-UI-skin.md#Available-UI-elements) below to create an image at the specified directory using the specified name inside `Images/Skins/MyCoolSkinExample`. See the image below for an example file structure. ![skinExample](https://user-images.githubusercontent.com/24532072/198904598-0d298035-5b02-431b-bfb4-7da4b9c821c9.png)
+These shapes are used all over Unciv and can be replaced to make a lot of UI elements change appearance at once. To change just one specific element use the [table](#available-ui-elements) below to create an image at the specified directory using the specified name inside `Images/Skins/MyCoolSkinExample`. See the image below for an example file structure. ![skinExample](https://user-images.githubusercontent.com/24532072/198904598-0d298035-5b02-431b-bfb4-7da4b9c821c9.png)
 
 ## Limitations
 
@@ -60,6 +60,7 @@ These shapes are used all over Unciv and can be replaced to make a lot of UI ele
 | DiplomacyScreen/ | SelectedCiv | null | |
 | General/ | AnimatedMenu | roundedEdgeRectangle | |
 | General/ | Border | null | |
+| General/ | DisabledBox | null | |
 | General/ | ExpanderTab | null | |
 | General/ | HealthBar | null | |
 | General/ | KeyCapturingButton | roundedEdgeRectangleSmall | |
@@ -89,7 +90,10 @@ These shapes are used all over Unciv and can be replaced to make a lot of UI ele
 | NewGameScreen/NationTable/ | RightInnerTable | null | |
 | NewGameScreen/NationTable/ | Title | null | |
 | NewGameScreen/PlayerPickerTable/ | PlayerTable | null | |
+| NotificationScroll/ | OneTimeNotificationColor | "#fceea8" | |
 | OverviewScreen/DiplomacyOverviewTab/ | CivTable | null | |
+| OverviewScreen/NotificationLog/ | HighlightColor1 | "#f0ead6" | |
+| OverviewScreen/NotificationLog/ | HighlightColor2 | "#f5c993" | |
 | OverviewScreen/NotificationOverviewTable/ | Notification | roundedEdgeRectangle | |
 | OverviewScreen/ReligionOverviewTab/ | BeliefDescription | null | |
 | OverviewScreen/TradesOverviewTab/ | OffersTable | null | |
@@ -220,7 +224,7 @@ the correct colors.
 
 A dictionary mapping string to a SkinElement. Default value: empty
 
-These variants can be used to define a different image, tint and/or alpha for a specified UI element. The string used to identify the UI element can be taken from the [table](Creating-a-UI-skin.md#Available-UI-elements) above by appending the name to the directory.
+These variants can be used to define a different image, tint and/or alpha for a specified UI element. The string used to identify the UI element can be taken from the [table](Creating-a-UI-skin.md#available-ui-elements) above by appending the name to the directory.
 ```
 | Directory             | Name          |
 |-----------------------|---------------|

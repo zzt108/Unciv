@@ -7,9 +7,13 @@ import com.unciv.models.ruleset.validation.RulesetValidator
 import com.unciv.models.ruleset.validation.Suppression
 import com.unciv.models.translations.getPlaceholderParameters
 import com.unciv.models.translations.getPlaceholderText
+import yairm210.purity.annotations.Readonly
 
 // I didn't put this in a companion object because APPARENTLY doing that means you can't use it in the init function.
 private val numberRegex = Regex("\\d+$") // Any number of trailing digits
+
+const val ADDITIVE_BONUS_EXPLANATION = "Multiple bonuses stack additively: +50% + +50% = +100%"
+const val MULTIPLICATIVE_BONUS_EXPLANATION = "Multiple bonuses stack multiplicatively: +50% + +50% = x1.5 * x1.5 = +125%"
 
 enum class UniqueType(
     val text: String,
@@ -43,10 +47,15 @@ enum class UniqueType(
     StatsFromGlobalFollowers("[stats] from every [positiveAmount] global followers [cityFilter]", UniqueTarget.FounderBelief),
 
     // Stat percentage boosts
-    StatPercentBonus("[relativeAmount]% [stat]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    StatPercentBonusCities("[relativeAmount]% [stat] [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    StatPercentFromObject("[relativeAmount]% [stat] from every [tileFilter/buildingFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    AllStatsPercentFromObject("[relativeAmount]% Yield from every [tileFilter/buildingFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
+    StatPercentBonus("[relativeAmount]% [stat]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
+    StatPercentBonusCities("[relativeAmount]% [stat] [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
+    StatPercentFromObject("[relativeAmount]% [stat] from every [tileFilter/buildingFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
+    StatPercentFromObjectToResource("[positiveAmount]% of [stat] from every [improvementFilter/buildingFilter] in the city added to [resource]", UniqueTarget.Building),
+    AllStatsPercentFromObject("[relativeAmount]% Yield from every [tileFilter/buildingFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
     StatPercentFromReligionFollowers("[relativeAmount]% [stat] from every follower, up to [relativeAmount]%", UniqueTarget.FollowerBelief, UniqueTarget.FounderBelief),
     BonusStatsFromCityStates("[relativeAmount]% [stat] from City-States", UniqueTarget.Global),
     StatPercentFromTradeRoutes("[relativeAmount]% [stat] from Trade Routes", UniqueTarget.Global),
@@ -54,9 +63,12 @@ enum class UniqueType(
     NullifiesStat("Nullifies [stat] [cityFilter]", UniqueTarget.Global),
     NullifiesGrowth("Nullifies Growth [cityFilter]", UniqueTarget.Global),
 
-    PercentProductionBuildings("[relativeAmount]% Production when constructing [buildingFilter] buildings [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    PercentProductionUnits("[relativeAmount]% Production when constructing [baseUnitFilter] units [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    PercentProductionWonders("[relativeAmount]% Production when constructing [buildingFilter] wonders [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
+    PercentProductionBuildings("[relativeAmount]% Production when constructing [buildingFilter] buildings [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
+    PercentProductionUnits("[relativeAmount]% Production when constructing [baseUnitFilter] units [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
+    PercentProductionWonders("[relativeAmount]% Production when constructing [buildingFilter] wonders [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
     PercentProductionBuildingsInCapital("[relativeAmount]% Production towards any buildings that already exist in the Capital", UniqueTarget.Global, UniqueTarget.FollowerBelief),
     PercentYieldFromPillaging("[relativeAmount]% Yield from pillaging tiles", UniqueTarget.Global, UniqueTarget.Unit),
     PercentHealthFromPillaging("[relativeAmount]% Health from pillaging tiles", UniqueTarget.Global, UniqueTarget.Unit),
@@ -93,8 +105,10 @@ enum class UniqueType(
 
     /// Growth
     GrowthPercentBonus("[relativeAmount]% growth [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    CarryOverFood("[amount]% Food is carried over after population increases [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    // Todo: moddability: specialists -> [populationFilter]
+    CarryOverFood("[amount]% Food is carried over after population increases [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
+    FoodConsumptionByPopulation("[relativeAmount]% Food consumption by [populationFilter] [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
+    @Deprecated("As of 4.19.10", ReplaceWith("[relativeAmount]% Food consumption by [Specialists] [cityFilter]"), DeprecationLevel.WARNING)
     FoodConsumptionBySpecialists("[relativeAmount]% Food consumption by specialists [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
 
     /// Happiness
@@ -121,9 +135,12 @@ enum class UniqueType(
     BuyBuildingsWithStat("May buy [buildingFilter] buildings with [stat] [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
     BuyUnitsByProductionCost("May buy [baseUnitFilter] units with [stat] for [nonNegativeAmount] times their normal Production cost", UniqueTarget.FollowerBelief, UniqueTarget.Global),
     BuyBuildingsByProductionCost("May buy [buildingFilter] buildings with [stat] for [nonNegativeAmount] times their normal Production cost", UniqueTarget.FollowerBelief, UniqueTarget.Global),
-    BuyItemsDiscount("[stat] cost of purchasing items in cities [relativeAmount]%", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    BuyBuildingsDiscount("[stat] cost of purchasing [buildingFilter] buildings [relativeAmount]%", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    BuyUnitsDiscount("[stat] cost of purchasing [baseUnitFilter] units [relativeAmount]%", UniqueTarget.Global, UniqueTarget.FollowerBelief),
+    BuyItemsDiscount("[stat] cost of purchasing items in cities [relativeAmount]%", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
+    BuyBuildingsDiscount("[stat] cost of purchasing [buildingFilter] buildings [relativeAmount]%", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
+    BuyUnitsDiscount("[stat] cost of purchasing [baseUnitFilter] units [relativeAmount]%", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
 
     /// Production to Stat conversion
     EnablesCivWideStatProduction("Enables conversion of city production to [civWideStat]", UniqueTarget.Global),
@@ -133,7 +150,8 @@ enum class UniqueType(
     // Should be replaced with moddable improvements when roads become moddable
     RoadMovementSpeed("Improves movement speed on roads",UniqueTarget.Global),
     RoadsConnectAcrossRivers("Roads connect tiles across rivers", UniqueTarget.Global),
-    RoadMaintenance("[relativeAmount]% maintenance on road & railroads", UniqueTarget.Global),
+    RoadMaintenance("[relativeAmount]% maintenance on road & railroads", UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
     NoImprovementMaintenanceInSpecificTiles("No Maintenance costs for improvements in [tileFilter] tiles", UniqueTarget.Global),
     SpecificImprovementTime("[relativeAmount]% construction time for [improvementFilter] improvements", UniqueTarget.Global, UniqueTarget.Unit),
     ImprovementTimeIncrease("Can build [improvementFilter] improvements at a [relativeAmount]% rate", UniqueTarget.Global, UniqueTarget.Unit),
@@ -141,21 +159,26 @@ enum class UniqueType(
     /// Building Maintenance
     GainFreeBuildings("Gain a free [buildingName] [cityFilter]", UniqueTarget.Global, UniqueTarget.Triggerable,
         docDescription = "Free buildings CANNOT be self-removing - this leads to an endless loop of trying to add the building"),
-    BuildingMaintenance("[relativeAmount]% maintenance cost for buildings [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
+    BuildingMaintenance("[relativeAmount]% maintenance cost for [buildingFilter] buildings [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
     RemoveBuilding("Remove [buildingFilter] [cityFilter]", UniqueTarget.Global, UniqueTarget.Triggerable),
     OneTimeSellBuilding("Sell [buildingFilter] buildings [cityFilter]", UniqueTarget.Global, UniqueTarget.Triggerable),
 
     /// Border growth
-    BorderGrowthPercentage("[relativeAmount]% Culture cost of natural border growth [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    TileCostPercentage("[relativeAmount]% Gold cost of acquiring tiles [cityFilter]", UniqueTarget.FollowerBelief, UniqueTarget.Global),
+    BorderGrowthPercentage("[relativeAmount]% Culture cost of natural border growth [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
+    TileCostPercentage("[relativeAmount]% Gold cost of acquiring tiles [cityFilter]", UniqueTarget.FollowerBelief, UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
 
     /// Policy Cost
     LessPolicyCostFromCities("Each city founded increases culture cost of policies [relativeAmount]% less than normal", UniqueTarget.Global),
-    LessPolicyCost("[relativeAmount]% Culture cost of adopting new Policies", UniqueTarget.Global),
+    LessPolicyCost("[relativeAmount]% Culture cost of adopting new Policies", UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
 
     /// Tech Cost
     LessTechCostFromCities("Each city founded increases Science cost of Technologies [relativeAmount]% less than normal", UniqueTarget.Global),
-    LessTechCost("[relativeAmount]% Science cost of researching new Technologies", UniqueTarget.Global),
+    LessTechCost("[relativeAmount]% Science cost of researching new Technologies", UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
 
     /// Natural Wonders
     StatsFromNaturalWonders("[stats] for every known Natural Wonder", UniqueTarget.Global),
@@ -163,7 +186,7 @@ enum class UniqueType(
 
     /// Great Persons
     GreatPersonPointPercentage("[relativeAmount]% Great Person generation [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    PercentGoldFromTradeMissions("[relativeAmount]% Gold from Great Merchant trade missions", UniqueTarget.Global),
+    PercentGoldFromTradeMissions("[relativeAmount]% Gold from Great Merchant trade missions", UniqueTarget.Global, UniqueTarget.Unit),
     GreatGeneralProvidesDoubleCombatBonus("Great General provides double combat bonus", UniqueTarget.Unit, UniqueTarget.Global),
     // This should probably support conditionals, e.g. <after discovering [tech]>
     MayanGainGreatPerson("Receive a free Great Person at the end of every [comment] (every 394 years), after researching [tech]. Each bonus person can only be chosen once.", UniqueTarget.Global),
@@ -186,18 +209,19 @@ enum class UniqueType(
     /// Unit Abilities
 
     UnitStartingExperience("New [baseUnitFilter] units start with [amount] XP [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
-    @Deprecated("As of 4.15.11", ReplaceWith("New [baseUnitFilter] units start with [amount] XP [cityFilter]"))
-    UnitStartingExperienceOld("New [baseUnitFilter] units start with [amount] Experience [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
     UnitStartingPromotions("All newly-trained [baseUnitFilter] units [cityFilter] receive the [promotion] promotion", UniqueTarget.Global, UniqueTarget.FollowerBelief),
     // Todo: Lowercase the 'U' of 'Units' in this unique
     CityHealingUnits("[mapUnitFilter] Units adjacent to this city heal [amount] HP per turn when healing", UniqueTarget.Global, UniqueTarget.FollowerBelief),
     
     // change the XP cost for a relative amount %
-    XPForPromotionModifier("[relativeAmount]% XP required for promotions",UniqueTarget.Global),
+    XPForPromotionModifier("[relativeAmount]% XP required for promotions",UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
 
     /// City Strength
-    BetterDefensiveBuildings("[relativeAmount]% City Strength from defensive buildings", UniqueTarget.Global),
-    StrengthForCities("[relativeAmount]% Strength for cities", UniqueTarget.Global, UniqueTarget.FollowerBelief),
+    BetterDefensiveBuildings("[relativeAmount]% City Strength from defensive buildings", UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
+    StrengthForCities("[relativeAmount]% Strength for cities", UniqueTarget.Global, UniqueTarget.FollowerBelief,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
 
     /// Resource production & consumption
     ConsumesResources("Consumes [amount] [resource]", UniqueTarget.Improvement, UniqueTarget.Building, UniqueTarget.Unit),
@@ -208,10 +232,12 @@ enum class UniqueType(
         docDescription = "These resources are removed *when work begins* on the construction. " +
                 "Do not confuse with \"costs [amount] [stockpiledResource]\" (lowercase 'c'), the Unit Action Modifier.",
         flags = setOf(UniqueFlag.AcceptsSpeedModifier)),
-    // Todo: Get rid of forced sign (+[relativeAmount]) and unify these two, e.g.: "[relativeAmount]% [resource/resourceType] production"
-    // Note that the parameter type 'resourceType' (strategic, luxury, bonus) currently doesn't exist and should then be added as well
-    StrategicResourcesIncrease("Quantity of strategic resources produced by the empire +[relativeAmount]%", UniqueTarget.Global),  // used by Policies
-    DoubleResourceProduced("Double quantity of [resource] produced", UniqueTarget.Global),
+
+    PercentResourceProduction("[relativeAmount]% [resourceFilter] resource production", UniqueTarget.Global),
+
+    /// Diplomacy
+    EnablesEmbassies("Enables establishment of embassies", UniqueTarget.Tech),
+    RequiresEmbassiesForDiplomacy("Requires establishing embassies to conduct advanced diplomacy", UniqueTarget.Global),
 
     /// Agreements
     EnablesOpenBorders("Enables Open Borders agreements", UniqueTarget.Global),
@@ -228,7 +254,7 @@ enum class UniqueType(
 
     /// Barbarian Encampments, Pillaging them & Converting Units
     NotifiedOfBarbarianEncampments("Notified of new Barbarian encampments", UniqueTarget.Global),
-    TripleGoldFromEncampmentsAndCities("Receive triple Gold from Barbarian encampments and pillaging Cities", UniqueTarget.Global),
+    GoldFromEncampmentsAndCities("Receive [relativeAmount]% Gold from Barbarian encampments and pillaging Cities", UniqueTarget.Global),
     GainFromEncampment("When conquering an encampment, earn [amount] Gold and recruit a Barbarian unit", UniqueTarget.Global),
     GainFromDefeatingUnit("When defeating a [mapUnitFilter] unit, earn [amount] Gold and recruit it", UniqueTarget.Global),
 
@@ -237,7 +263,8 @@ enum class UniqueType(
     FreeExtraBeliefs("May choose [amount] additional [beliefType] beliefs when [foundingOrEnhancing] a religion", UniqueTarget.Global),
     FreeExtraAnyBeliefs("May choose [amount] additional belief(s) of any type when [foundingOrEnhancing] a religion", UniqueTarget.Global),
     StatsWhenAdoptingReligion("[stats] when a city adopts this religion for the first time", UniqueTarget.Global, flags = setOf(UniqueFlag.AcceptsSpeedModifier)),
-    NaturalReligionSpreadStrength("[relativeAmount]% Natural religion spread [cityFilter]", UniqueTarget.FollowerBelief, UniqueTarget.Global),
+    NaturalReligionSpreadStrength("[relativeAmount]% Natural religion spread [cityFilter]", UniqueTarget.FollowerBelief, UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
     ReligionSpreadDistance("Religion naturally spreads to cities [amount] tiles away", UniqueTarget.Global, UniqueTarget.FollowerBelief),
     MayNotGenerateGreatProphet("May not generate great prophet equivalents naturally", UniqueTarget.Global),
     FaithCostOfGreatProphetChange("[relativeAmount]% Faith cost of generating Great Prophet equivalents", UniqueTarget.Global),
@@ -265,7 +292,8 @@ enum class UniqueType(
     TechBoostWhenScientificBuildingsBuiltInCapital("Receive a tech boost when scientific buildings/wonders are built in capital", UniqueTarget.Global),
     ResearchableMultipleTimes("Can be continually researched", UniqueTarget.Tech),
 
-    GoldenAgeLength("[relativeAmount]% Golden Age length", UniqueTarget.Global),
+    GoldenAgeLength("[relativeAmount]% Golden Age length", UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
 
     PopulationLossFromNukes("Population loss from nuclear attacks [relativeAmount]% [cityFilter]", UniqueTarget.Global),
     GarrisonDamageFromNukes("Damage to garrison from nuclear attacks [relativeAmount]% [cityFilter]", UniqueTarget.Global),
@@ -286,8 +314,6 @@ enum class UniqueType(
     CanBePurchasedForAmountStat("Can be purchased for [amount] [stat] [cityFilter]", UniqueTarget.Building, UniqueTarget.Unit),
     MaxNumberBuildable("Limited to [amount] per Civilization", UniqueTarget.Building, UniqueTarget.Unit),
 
-    @Deprecated("As of 4.16.0", ReplaceWith("Unavailable <when number of [Completed Policy branches] is less than [amount]>"))
-    HiddenBeforeAmountPolicies("Hidden until [amount] social policy branches have been completed", UniqueTarget.Building, UniqueTarget.Unit),
     /** A special unique, as it only activates [RejectionReasonType] when it has conditionals that *do not* apply.
      * Meant to be used together with conditionals, like `"Only available <after adopting [Piety]> <while the empire is happy>"`.
      * Restricts Upgrade/Transform pathways.
@@ -314,7 +340,8 @@ enum class UniqueType(
 
     CostIncreasesPerCity("Cost increases by [amount] per owned city", UniqueTarget.Building, UniqueTarget.Unit),
     CostIncreasesWhenBuilt("Cost increases by [amount] when built", UniqueTarget.Building, UniqueTarget.Unit),
-    CostPercentageChange("[amount]% production cost", UniqueTarget.Building, UniqueTarget.Unit, docDescription = "Intended to be used with conditionals to dynamically alter construction costs"),
+    CostPercentageChange("[amount]% production cost", UniqueTarget.Building, UniqueTarget.Unit,
+        docDescription = "Intended to be used with conditionals to dynamically alter construction costs. $MULTIPLICATIVE_BONUS_EXPLANATION"),
 
     /** Triggers [RejectionReasonType] when any conditional does NOT apply.
      * Doesn't restrict Upgrade/Transform pathways.
@@ -343,13 +370,18 @@ enum class UniqueType(
 
     DestroyedWhenCityCaptured("Destroyed when the city is captured", UniqueTarget.Building),
     NotDestroyedWhenCityCaptured("Never destroyed when the city is captured", UniqueTarget.Building),
-    DoublesGoldFromCapturingCity("Doubles Gold given to enemy if city is captured", UniqueTarget.Building),
+    GoldFromCapturingCity("[relativeAmount]% Gold given to enemy if city is captured", UniqueTarget.Building),
 
-    RemoveAnnexUnhappiness("Remove extra unhappiness from annexed cities", UniqueTarget.Building),
+    RemovesAnnexUnhappiness("Removes extra unhappiness from annexed cities", UniqueTarget.Building),
     ConnectTradeRoutes("Connects trade routes over water", UniqueTarget.Building),
     GainBuildingWhereBuildable("Automatically built in all cities where it is buildable", UniqueTarget.Building),
 
-    CreatesOneImprovement("Creates a [improvementName] improvement on a specific tile", UniqueTarget.Building),
+    CreatesOneImprovement("Creates a [improvementName] improvement on a specific tile", UniqueTarget.Building,
+        docDescription = "When choosing to construct this building, the player must select a tile where the improvement can be built." +
+                " Upon building completion, the tile will gain this improvement." + 
+                " Limited to one per building.",
+        flags = UniqueFlag.setOfNoConditionals
+        ),
     //endregion
 
     ///////////////////////////////////////// region 04 UNIT UNIQUES /////////////////////////////////////////
@@ -372,7 +404,7 @@ enum class UniqueType(
     PreventSpreadingReligion("Prevents spreading of religion to the city it is next to", UniqueTarget.Unit),
     RemoveOtherReligions("Removes other religions when spreading religion", UniqueTarget.Unit),
 
-    MayParadrop("May Paradrop up to [amount] tiles from inside friendly territory", UniqueTarget.Unit),
+    MayParadrop("May Paradrop to [tileFilter] tiles up to [positiveAmount] tiles away", UniqueTarget.Unit),
     CanAirsweep("Can perform Air Sweep", UniqueTarget.Unit),
 
     CanSpeedupConstruction("Can speed up construction of a building", UniqueTarget.Unit),
@@ -386,22 +418,25 @@ enum class UniqueType(
     AutomationPrimaryAction("Automation is a primary action", UniqueTarget.Unit, flags = UniqueFlag.setOfHiddenToUsers),
 
     // Strength bonuses
-    Strength("[relativeAmount]% Strength", UniqueTarget.Unit, UniqueTarget.Global),
+    Strength("[relativeAmount]% Strength", UniqueTarget.Unit, UniqueTarget.Global,
+        docDescription = ADDITIVE_BONUS_EXPLANATION),
+    StrengthAmount("[relativeAmount] Strength", UniqueTarget.Unit, UniqueTarget.Global),
     StrengthNearCapital("[relativeAmount]% Strength decreasing with distance from the capital", UniqueTarget.Unit, UniqueTarget.Global),
-    FlankAttackBonus("[relativeAmount]% to Flank Attack bonuses", UniqueTarget.Unit, UniqueTarget.Global),
+    FlankAttackBonus("[relativeAmount]% to Flank Attack bonuses", UniqueTarget.Unit, UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
     StrengthForAdjacentEnemies("[relativeAmount]% Strength for enemy [mapUnitFilter] units in adjacent [tileFilter] tiles", UniqueTarget.Unit),
-    StrengthWhenStacked("[relativeAmount]% Strength when stacked with [mapUnitFilter]", UniqueTarget.Unit),  // candidate for conditional!
     StrengthBonusInRadius("[relativeAmount]% Strength bonus for [mapUnitFilter] units within [amount] tiles", UniqueTarget.Unit),
 
     // Stat bonuses
     AdditionalAttacks("[amount] additional attacks per turn", UniqueTarget.Unit, UniqueTarget.Global),
     Movement("[amount] Movement", UniqueTarget.Unit, UniqueTarget.Global),
-    Sight("[amount] Sight", UniqueTarget.Unit, UniqueTarget.Global, UniqueTarget.Terrain),
+    Sight("[amount] Sight", UniqueTarget.Unit, UniqueTarget.Global, UniqueTarget.Terrain, UniqueTarget.Improvement),
     Range("[amount] Range", UniqueTarget.Unit, UniqueTarget.Global),
     AirInterceptionRange("[relativeAmount] Air Interception Range", UniqueTarget.Unit, UniqueTarget.Global),
     Heal("[amount] HP when healing", UniqueTarget.Unit, UniqueTarget.Global),
 
-    SpreadReligionStrength("[relativeAmount]% Spread Religion Strength", UniqueTarget.Unit, UniqueTarget.Global),
+    SpreadReligionStrength("[relativeAmount]% Spread Religion Strength", UniqueTarget.Unit, UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
     StatsWhenSpreading("When spreading religion to a city, gain [amount] times the amount of followers of other religions as [stat]", UniqueTarget.Unit, UniqueTarget.Global),
 
     // Attack restrictions
@@ -428,6 +463,10 @@ enum class UniqueType(
     WithdrawsBeforeMeleeCombat("Withdraws before melee combat", UniqueTarget.Unit),
     CannotCaptureCities("Unable to capture cities", UniqueTarget.Unit, UniqueTarget.Global),
     CannotPillage("Unable to pillage tiles", UniqueTarget.Unit, UniqueTarget.Global),
+    
+    // allow any unit to destory cities instead of capturing them, also allows non melee units to destroy cities
+    CanDestroyCities("Destroys [cityFilter] cities instead of capturing", UniqueTarget.Unit,
+        docDescription = "The unit will destroy [cityFilter] cities instead of capturing them, also allows non-melee units to destroy cities." + "Capital cities (including city states) are immune to this effect."),
 
     // Movement
     NoMovementToPillage("No movement cost to pillage", UniqueTarget.Unit, UniqueTarget.Global),
@@ -449,7 +488,8 @@ enum class UniqueType(
 
     // Carrying
     CarryAirUnits("Can carry [amount] [mapUnitFilter] units", UniqueTarget.Unit),
-    CarryExtraAirUnits("Can carry [amount] extra [mapUnitFilter] units", UniqueTarget.Unit),
+    CarryExtraAirUnits("Can carry [amount] extra [mapUnitFilter] units", UniqueTarget.Unit, UniqueTarget.Building,
+        docDescription = "For buildings, supports using `Air` for `mapUnitFilter` to increase city air unit capacity."),
     CannotBeCarriedBy("Cannot be carried by [mapUnitFilter] units", UniqueTarget.Unit),
     // Interception
     ChanceInterceptAirAttacks("[relativeAmount]% chance to intercept air attacks", UniqueTarget.Unit),
@@ -460,8 +500,10 @@ enum class UniqueType(
     CannotInterceptUnits("Cannot intercept [mapUnitFilter] units", UniqueTarget.Unit),
     StrengthWhenAirsweep("[relativeAmount]% Strength when performing Air Sweep", UniqueTarget.Unit),
 
-    UnitMaintenanceDiscount("[relativeAmount]% maintenance costs", UniqueTarget.Unit, UniqueTarget.Global),
-    UnitUpgradeCost("[relativeAmount]% Gold cost of upgrading", UniqueTarget.Unit, UniqueTarget.Global),
+    UnitMaintenanceDiscount("[relativeAmount]% maintenance costs", UniqueTarget.Unit, UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
+    UnitUpgradeCost("[relativeAmount]% Gold cost of upgrading", UniqueTarget.Unit, UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
 
     // Gains from battle
     DamageUnitsPlunder("Earn [amount]% of the damage done to [combatantFilter] units as [stockpile]", UniqueTarget.Unit, UniqueTarget.Global),
@@ -472,7 +514,8 @@ enum class UniqueType(
 
     // XP
     FlatXPGain("[amount] XP gained from combat", UniqueTarget.Unit, UniqueTarget.Global),
-    PercentageXPGain("[relativeAmount]% XP gained from combat", UniqueTarget.Unit, UniqueTarget.Global),
+    PercentageXPGain("[relativeAmount]% XP gained from combat", UniqueTarget.Unit, UniqueTarget.Global,
+        docDescription = MULTIPLICATIVE_BONUS_EXPLANATION),
     GreatPersonFromCombat("Can be earned through combat", UniqueTarget.Unit),
     GreatPersonEarnedFaster("[greatPerson] is earned [relativeAmount]% faster", UniqueTarget.Unit, UniqueTarget.Global),
 
@@ -496,6 +539,7 @@ enum class UniqueType(
     IgnoresZOC("Ignores Zone of Control", UniqueTarget.Unit),
     RoughTerrainPenalty("Rough terrain penalty", UniqueTarget.Unit),
     CanEnterIceTiles("Can enter ice tiles", UniqueTarget.Unit),
+    CannotEmbark("Cannot embark", UniqueTarget.Unit),
     CannotEnterOcean("Cannot enter ocean tiles", UniqueTarget.Unit),
     CanEnterForeignTiles("May enter foreign tiles without open borders", UniqueTarget.Unit),
     CanEnterForeignTilesButLosesReligiousStrength("May enter foreign tiles without open borders, but loses [amount] religious strength each turn it ends there", UniqueTarget.Unit),
@@ -549,8 +593,8 @@ enum class UniqueType(
     // Natural wonders
     NaturalWonderNeighborCount("Must be adjacent to [amount] [simpleTerrain] tiles", UniqueTarget.Terrain, flags = UniqueFlag.setOfHiddenToUsers),
     NaturalWonderNeighborsRange("Must be adjacent to [amount] to [amount] [simpleTerrain] tiles", UniqueTarget.Terrain, flags = UniqueFlag.setOfHiddenToUsers),
-    NaturalWonderSmallerLandmass("Must not be on [amount] largest landmasses", UniqueTarget.Terrain, flags = UniqueFlag.setOfHiddenToUsers),
-    NaturalWonderLargerLandmass("Must be on [amount] largest landmasses", UniqueTarget.Terrain, flags = UniqueFlag.setOfHiddenToUsers),
+    NaturalWonderSmallerLandmass("Must not be on [amount] largest landmasses", UniqueTarget.Terrain, UniqueTarget.Resource, flags = UniqueFlag.setOfHiddenToUsers),
+    NaturalWonderLargerLandmass("Must be on [amount] largest landmasses", UniqueTarget.Terrain, UniqueTarget.Resource, flags = UniqueFlag.setOfHiddenToUsers),
     NaturalWonderLatitude("Occurs on latitudes from [amount] to [amount] percent of distance equator to pole", UniqueTarget.Terrain, flags = UniqueFlag.setOfHiddenToUsers),
     NaturalWonderGroups("Occurs in groups of [amount] to [amount] tiles", UniqueTarget.Terrain, flags = UniqueFlag.setOfHiddenToUsers),
     NaturalWonderConvertNeighbors("Neighboring tiles will convert to [baseTerrain/terrainFeature]", UniqueTarget.Terrain, flags = UniqueFlag.setOfHiddenToUsers,
@@ -559,7 +603,7 @@ enum class UniqueType(
     GrantsStatsToFirstToDiscover("Grants [stats] to the first civilization to discover it", UniqueTarget.Terrain),
 
     // General terrain
-    DamagesContainingUnits("Units ending their turn on this terrain take [amount] damage", UniqueTarget.Terrain),
+    DamagesContainingUnits("Units ending their turn on this terrain take [amount] damage", UniqueTarget.Terrain, flags = UniqueFlag.setOfNoConditionals),
     TerrainGrantsPromotion("Grants [promotion] ([comment]) to adjacent [mapUnitFilter] units for the rest of the game", UniqueTarget.Terrain),
     GrantsCityStrength("[amount] Strength for cities built on this terrain", UniqueTarget.Terrain),
     ProductionBonusWhenRemoved("Provides a one-time bonus of [stats] to the closest city when cut down", UniqueTarget.Terrain, flags = setOf(UniqueFlag.AcceptsSpeedModifier, UniqueFlag.AcceptsGameProgressModifier)),
@@ -639,7 +683,7 @@ enum class UniqueType(
     CanOnlyBeBuiltOnTile("Can only be built on [tileFilter] tiles", UniqueTarget.Improvement),
     CannotBuildOnTile("Cannot be built on [tileFilter] tiles", UniqueTarget.Improvement),
     CanOnlyImproveResource("Can only be built to improve a resource", UniqueTarget.Improvement),
-    NoFeatureRemovalNeeded("Does not need removal of [tileFilter]", UniqueTarget.Improvement),
+    NoFeatureRemovalNeeded("Does not need removal of [terrainFeature]", UniqueTarget.Improvement),
     RemovesFeaturesIfBuilt("Removes removable features when built", UniqueTarget.Improvement),
 
     DefensiveBonus("Gives a defensive bonus of [relativeAmount]%", UniqueTarget.Improvement, 
@@ -677,6 +721,8 @@ enum class UniqueType(
     ConditionalAfterTurns("after turn number [nonNegativeAmount]", UniqueTarget.Conditional),
     ConditionalSpeed("on [speed] game speed", UniqueTarget.Conditional),
     ConditionalDifficulty("on [difficulty] difficulty", UniqueTarget.Conditional),
+    ConditionalDifficultyOrHigher("on [difficulty] difficulty or higher", UniqueTarget.Conditional),
+    ConditionalDifficultyOrLower("on [difficulty] difficulty or lower", UniqueTarget.Conditional),
     ConditionalVictoryEnabled("when [victoryType] Victory is enabled", UniqueTarget.Conditional),
     ConditionalVictoryDisabled("when [victoryType] Victory is disabled", UniqueTarget.Conditional),
     ConditionalReligionEnabled("when religion is enabled", UniqueTarget.Conditional),
@@ -684,6 +730,7 @@ enum class UniqueType(
     ConditionalEspionageEnabled("when espionage is enabled", UniqueTarget.Conditional),
     ConditionalEspionageDisabled("when espionage is disabled", UniqueTarget.Conditional),
     ConditionalNuclearWeaponsEnabled("when nuclear weapons are enabled", UniqueTarget.Conditional),
+    ConditionalNuclearWeaponsDisabled("when nuclear weapons are disabled", UniqueTarget.Conditional),
 
     /////// general conditionals
     ConditionalChance("with [nonNegativeAmount]% chance", UniqueTarget.Conditional),
@@ -699,10 +746,7 @@ enum class UniqueType(
     ConditionalWLTKD("during We Love The King Day", UniqueTarget.Conditional),
 
     ConditionalHappy("while the empire is happy", UniqueTarget.Conditional),
-    ConditionalBetweenHappiness("when between [amount] and [amount] Happiness", UniqueTarget.Conditional),
-    ConditionalAboveHappiness("when above [amount] Happiness", UniqueTarget.Conditional),
-    ConditionalBelowHappiness("when below [amount] Happiness", UniqueTarget.Conditional),
-
+    
     ConditionalDuringEra("during the [era]", UniqueTarget.Conditional),
     ConditionalBeforeEra("before the [era]", UniqueTarget.Conditional),
     ConditionalStartingFromEra("starting from the [era]", UniqueTarget.Conditional),
@@ -715,6 +759,7 @@ enum class UniqueType(
         docDescription = "This condition is fulfilled while the technology is actively being researched (it is the one research points are added to)"),
 
     ConditionalFirstCivToAdopt("if no other Civilization has adopted this", UniqueTarget.Conditional),
+    ConditionalNoCivAdopted("if no Civilization has adopted [policy/belief]", UniqueTarget.Conditional),
     ConditionalAfterPolicyOrBelief("after adopting [policy/belief]", UniqueTarget.Conditional),
     ConditionalBeforePolicyOrBelief("before adopting [policy/belief]", UniqueTarget.Conditional),
 
@@ -731,17 +776,20 @@ enum class UniqueType(
     ConditionalBuildingBuiltAll("if [buildingFilter] is constructed in all [cityFilter] cities", UniqueTarget.Conditional),
     ConditionalBuildingBuiltAmount("if [buildingFilter] is constructed in at least [positiveAmount] of [cityFilter] cities", UniqueTarget.Conditional),
     ConditionalBuildingBuiltByAnybody("if [buildingFilter] is constructed by anybody", UniqueTarget.Conditional),
+    ConditionalBuildingNotBuiltByAnybody("if [buildingFilter] is not constructed by anybody", UniqueTarget.Conditional),
 
     ConditionalWithResource("with [resource]", UniqueTarget.Conditional),
     ConditionalWithoutResource("without [resource]", UniqueTarget.Conditional),
 
     // Supports also stockpileable resources (Gold, Faith, Culture, Science)
     ConditionalWhenAboveAmountStatResource("when above [amount] [stat/resource]", UniqueTarget.Conditional, flags = setOf(UniqueFlag.AcceptsSpeedModifier),
-        docDescription = "Stats refers to the accumulated stat, not stat-per-turn"),
+        docDescription = "Stats refers to the accumulated stat, not stat-per-turn. Therefore, does not support Happiness - for that use 'when above [amount] Happiness'"),
     ConditionalWhenBelowAmountStatResource("when below [amount] [stat/resource]", UniqueTarget.Conditional, flags = setOf(UniqueFlag.AcceptsSpeedModifier),
-        docDescription = "Stats refers to the accumulated stat, not stat-per-turn"),
+        docDescription = "Stats refers to the accumulated stat, not stat-per-turn. Therefore, does not support Happiness - for that use 'when below [amount] Happiness'"),
     ConditionalWhenBetweenStatResource("when between [amount] and [amount] [stat/resource]", UniqueTarget.Conditional, flags = setOf(UniqueFlag.AcceptsSpeedModifier),
-        docDescription = "Stats refers to the accumulated stat, not stat-per-turn"),
+        docDescription = "Stats refers to the accumulated stat, not stat-per-turn." +
+                " Therefore, does not support Happiness." +
+                " 'Between' is inclusive - so 'between 1 and 5' includes 1 and 5."),
 
     /////// city conditionals
     ConditionalInThisCity("in this city", UniqueTarget.Conditional),
@@ -756,7 +804,8 @@ enum class UniqueType(
     ConditionalCityWithoutBuilding("in cities without a [buildingFilter]", UniqueTarget.Conditional),
     ConditionalPopulationFilter("in cities with at least [positiveAmount] [populationFilter]", UniqueTarget.Conditional),
     ConditionalExactPopulationFilter("in cities with [positiveAmount] [populationFilter]", UniqueTarget.Conditional),
-    ConditionalBetweenPopulationFilter("in cities with between [amount] and [amount] [populationFilter]", UniqueTarget.Conditional),
+    ConditionalBetweenPopulationFilter("in cities with between [amount] and [amount] [populationFilter]", UniqueTarget.Conditional,
+        docDescription = "'Between' is inclusive - so 'between 1 and 5' includes 1 and 5."),
     ConditionalBelowPopulationFilter("in cities with less than [amount] [populationFilter]", UniqueTarget.Conditional),
     ConditionalWhenGarrisoned("with a garrison", UniqueTarget.Conditional),
 
@@ -777,6 +826,8 @@ enum class UniqueType(
     ConditionalAboveHP("when above [positiveAmount] HP", UniqueTarget.Conditional),
     ConditionalBelowHP("when below [positiveAmount] HP", UniqueTarget.Conditional),
     ConditionalHasNotUsedOtherActions("if it hasn't used other actions yet", UniqueTarget.Conditional),
+    ConditionalStackedWithUnit("when stacked with a [mapUnitFilter] unit", UniqueTarget.Conditional),
+    ConditionalNotStackedWithUnit("when not stacked with a [mapUnitFilter] unit", UniqueTarget.Conditional),
 
     /////// tile conditionals
     ConditionalNeighborTiles("with [nonNegativeAmount] to [nonNegativeAmount] neighboring [tileFilter] tiles", UniqueTarget.Conditional),
@@ -799,7 +850,11 @@ enum class UniqueType(
     ConditionalCountableDifferentThan("when number of [countable] is different than [countable]", UniqueTarget.Conditional),
     ConditionalCountableMoreThan("when number of [countable] is more than [countable]", UniqueTarget.Conditional),
     ConditionalCountableLessThan("when number of [countable] is less than [countable]", UniqueTarget.Conditional),
-    ConditionalCountableBetween("when number of [countable] is between [countable] and [countable]", UniqueTarget.Conditional),
+    ConditionalCountableBetween("when number of [countable] is between [countable] and [countable]", UniqueTarget.Conditional,
+        docDescription = "'Between' is inclusive - so 'between 1 and 5' includes 1 and 5."),
+
+    /////// carrying conditionals
+    ConditionalWhenCarriedBy("when carried by [mapUnitFilter] units", UniqueTarget.Conditional),
 
     //endregion
 
@@ -808,6 +863,8 @@ enum class UniqueType(
 
     OneTimeFreeUnit("Free [unit] appears", UniqueTarget.Triggerable),  // used in Policies, Buildings
     OneTimeAmountFreeUnits("[positiveAmount] free [unit] units appear", UniqueTarget.Triggerable), // used in Buildings
+    OneTimeRebel("A [unit] rebels", UniqueTarget.Triggerable),  // used in Policies, Buildings
+    OneTimeAmountRebels("[positiveAmount] [unit]s rebel", UniqueTarget.Triggerable), // used in Buildings
     OneTimeFreeUnitRuins("Free [unit] found in the ruins", UniqueTarget.Ruins), // Differs from "Free [] appears" in that it spawns near the ruins instead of in a city
     OneTimeFreePolicy("Free Social Policy", UniqueTarget.Triggerable), // used in Buildings
     OneTimeAmountFreePolicies("[positiveAmount] Free Social Policies", UniqueTarget.Triggerable),  // Not used in Vanilla
@@ -817,19 +874,19 @@ enum class UniqueType(
     OneTimeGainPopulation("[amount] population [cityFilter]", UniqueTarget.Triggerable),  // used in CN tower
     OneTimeGainPopulationRandomCity("[amount] population in a random city", UniqueTarget.Triggerable),
     OneTimeDiscoverTech("Discover [tech]", UniqueTarget.Triggerable),
-    OneTimeAdoptPolicy("Adopt [policy]", UniqueTarget.Triggerable),
-    OneTimeRemovePolicy("Remove [policy]", UniqueTarget.Triggerable),
-    OneTimeRemovePolicyRefund("Remove [policy] and refund [amount]% of its cost", UniqueTarget.Triggerable),
+    OneTimeAdoptPolicyOrBelief("Adopt [policy/belief]", UniqueTarget.Triggerable),
+    OneTimeRemovePolicy("Remove [policyFilter]", UniqueTarget.Triggerable),
+    OneTimeRemovePolicyRefund("Remove [policyFilter] and refund [amount]% of its cost", UniqueTarget.Triggerable),
     OneTimeFreeTech("Free Technology", UniqueTarget.Triggerable),  // used in Buildings
     OneTimeAmountFreeTechs("[positiveAmount] Free Technologies", UniqueTarget.Triggerable),  // used in Policy
-    OneTimeFreeTechRuins("[positiveAmount] free random researchable Tech(s) from the [era]", UniqueTarget.Triggerable),
+    OneTimeFreeTechRuins("[positiveAmount] free random researchable Tech(s) from the [eraFilter]", UniqueTarget.Triggerable),
     OneTimeRevealEntireMap("Reveals the entire map", UniqueTarget.Triggerable),  // used in tech
     OneTimeFreeBelief("Gain a free [beliefType] belief", UniqueTarget.Triggerable),
     OneTimeTriggerVoting("Triggers voting for the Diplomatic Victory", UniqueTarget.Triggerable),  // used in Building
 
     OneTimeConsumeResources("Instantly consumes [positiveAmount] [stockpiledResource]", UniqueTarget.Triggerable),
     OneTimeProvideResources("Instantly provides [positiveAmount] [stockpiledResource]", UniqueTarget.Triggerable),
-
+    OneTimeSetStockpile("Set [stockpile] to [countable]", UniqueTarget.Triggerable, flags = setOf(UniqueFlag.AcceptsSpeedModifier)),
     OneTimeGainResource("Instantly gain [amount] [stockpile]", UniqueTarget.Triggerable, flags = setOf(UniqueFlag.AcceptsSpeedModifier)),
     OneTimeGainStat("Gain [amount] [stat]", UniqueTarget.Triggerable, flags = setOf(UniqueFlag.AcceptsSpeedModifier)),
     OneTimeGainStatRange("Gain [amount]-[amount] [stat]", UniqueTarget.Triggerable, flags = setOf(UniqueFlag.AcceptsSpeedModifier)),
@@ -838,22 +895,29 @@ enum class UniqueType(
     OneTimeGainTechPercent("Research [relativeAmount]% of [tech]", UniqueTarget.Triggerable),
 
     OneTimeTakeOverTilesInRadius("Gain control over [tileFilter] tiles in a [nonNegativeAmount]-tile radius", UniqueTarget.Triggerable),
+    OneTimeTakeOverTilesInCity("Gain control over [positiveAmount] tiles [cityFilter]", UniqueTarget.Triggerable),
 
     // todo: The "up to [All]" used in vanilla json is not nice to read. Split?
     // Or just reword it without the 'up to', so it reads "Reveal [amount/'all'] [tileFilter] tiles within [amount] tiles"
     OneTimeRevealSpecificMapTiles("Reveal up to [positiveAmount/'all'] [tileFilter] within a [positiveAmount] tile radius", UniqueTarget.Triggerable),
     OneTimeRevealCrudeMap("From a randomly chosen tile [positiveAmount] tiles away from the ruins, reveal tiles up to [positiveAmount] tiles away with [positiveAmount]% chance", UniqueTarget.Ruins),
-    OneTimeGlobalAlert("Triggers the following global alert: [comment]", UniqueTarget.Triggerable), // used in Policy
+    OneTimeGlobalAlert("Triggers the following global alert: [comment]", UniqueTarget.Triggerable,
+        docDescription = "Supported on Policies and Technologies.\n" +
+            "For other targets, the generated Notification may not read nicely, and will likely not support translation." +
+            " Reason: Your [comment] gets a generated introduction, other triggers usually notify _you_, not _others_," +
+            " and that difference is currently handled by mapping text.\n" +
+            "Conditionals evaluate in the context of the civilization having the Unique, not the recipients of the alerts."),
     OneTimeGlobalSpiesWhenEnteringEra("Every major Civilization gains a spy once a civilization enters this era", UniqueTarget.Era),
     OneTimeSpiesLevelUp("Promotes all spies [positiveAmount] time(s)", UniqueTarget.Triggerable),  // used in Policies, Buildings
     OneTimeGainSpy("Gain an extra spy", UniqueTarget.Triggerable),  // used in Wonders
-
 
     SkipPromotion("Doing so will consume this opportunity to choose a Promotion", UniqueTarget.Promotion),
     FreePromotion("This Promotion is free", UniqueTarget.Promotion),
 
     OneTimeChangeTerrain("Turn this tile into a [terrainName] tile", UniqueTarget.Triggerable),
 
+    OneTimeRemoveResourcesFromTile("Remove [resourceFilter] resources from this tile", UniqueTarget.Triggerable),
+    OneTimeRemoveImprovementsFromTile("Remove [improvementFilter] improvements from this tile", UniqueTarget.Triggerable),
 
     UnitsGainPromotion("[mapUnitFilter] units gain the [promotion] promotion", UniqueTarget.Triggerable,
         docDescription = "Works only with promotions that are valid for the unit's type - or for promotions that do not specify any."),  // Not used in Vanilla
@@ -861,7 +925,10 @@ enum class UniqueType(
     FreeSpecificBuildings("Provides a [buildingName] in your first [positiveAmount] cities for free", UniqueTarget.Triggerable),  // used in Policy
     TriggerEvent("Triggers a [event] event", UniqueTarget.Triggerable),
     MarkTutorialComplete("Mark tutorial [comment] complete", UniqueTarget.Triggerable, flags = UniqueFlag.setOfHiddenNoConditionals),
-    
+    PlaySound("Play [comment] sound", UniqueTarget.Triggerable, flags = UniqueFlag.setOfHiddenToUsers,
+        docDescription = "See [Images and Audio](Images-and-Audio.md#sounds) for a list of available sounds."),
+    GetLeaderTitle("Get the leader title of [leaderTitle]", UniqueTarget.Triggerable, flags = UniqueFlag.setOfHiddenToUsers),
+
     //endregion
     
     ///////////////////////////////////////// region 09 UNIT TRIGGERABLES /////////////////////////////////////////
@@ -880,6 +947,7 @@ enum class UniqueType(
                 "Turns left on the status decrease at the *start of turn*, so bonuses applied for 1 turn are stll applied during other civ's turns."),
     OneTimeUnitLoseStatus("[unitTriggerTarget] loses the [promotion] status", UniqueTarget.UnitTriggerable),
     OneTimeUnitDestroyed("[unitTriggerTarget] is destroyed", UniqueTarget.UnitTriggerable),
+    OneTimeUnitGetsName("[unitTriggerTarget] gets a name from the [unitNameGroup] group", UniqueTarget.UnitTriggerable),
     //endregion
 
 
@@ -889,12 +957,16 @@ enum class UniqueType(
     TriggerUponEnteringEra("upon entering the [era]", UniqueTarget.TriggerCondition),
     TriggerUponEnteringEraUnfiltered("upon entering a new era", UniqueTarget.TriggerCondition),
     TriggerUponAdoptingPolicyOrBelief("upon adopting [policy/belief]", UniqueTarget.TriggerCondition),
-    TriggerUponDeclaringWar("upon declaring war with a major Civilization", UniqueTarget.TriggerCondition),
+    TriggerUponDeclaringWarFiltered("upon declaring war on [civFilter] Civilizations", UniqueTarget.TriggerCondition),
+    TriggerUponBeingDeclaredWarUpon("upon being declared war on by [civFilter] Civilizations", UniqueTarget.TriggerCondition),
+    TriggerUponEnteringWar("upon entering a war with [civFilter] Civilizations", UniqueTarget.TriggerCondition),
     TriggerUponDeclaringFriendship("upon declaring friendship", UniqueTarget.TriggerCondition),
     TriggerUponSigningDefensivePact("upon declaring a defensive pact", UniqueTarget.TriggerCondition),
     TriggerUponEnteringGoldenAge("upon entering a Golden Age", UniqueTarget.TriggerCondition),
+    TriggerUpponEndingGoldenAge("upon ending a Golden Age", UniqueTarget.TriggerCondition),
     /** Can be placed upon both units and as global */
     TriggerUponConqueringCity("upon conquering a city", UniqueTarget.TriggerCondition, UniqueTarget.UnitTriggerCondition),
+    TriggerUponLosingCity("upon losing a city", UniqueTarget.TriggerCondition),
     TriggerUponFoundingCity("upon founding a city", UniqueTarget.TriggerCondition),
     TriggerUponBuildingImprovement("upon building a [improvementFilter] improvement", UniqueTarget.TriggerCondition, UniqueTarget.UnitTriggerCondition),
     TriggerUponDiscoveringNaturalWonder("upon discovering a Natural Wonder", UniqueTarget.TriggerCondition),
@@ -902,8 +974,8 @@ enum class UniqueType(
     // We have a separate trigger to include the cityFilter, since '[in all cities]' can be read '*only* if it's in all cities'
     TriggerUponConstructingBuildingCityFilter("upon constructing [buildingFilter] [cityFilter]", UniqueTarget.TriggerCondition),
     TriggerUponGainingUnit("upon gaining a [baseUnitFilter] unit", UniqueTarget.TriggerCondition),
-    TriggerUponTurnEnd("upon turn end", UniqueTarget.TriggerCondition),
-    TriggerUponTurnStart("upon turn start", UniqueTarget.TriggerCondition),
+    TriggerUponTurnEnd("upon turn end", UniqueTarget.TriggerCondition, UniqueTarget.UnitTriggerCondition),
+    TriggerUponTurnStart("upon turn start", UniqueTarget.TriggerCondition, UniqueTarget.UnitTriggerCondition),
 
     TriggerUponFoundingPantheon("upon founding a Pantheon", UniqueTarget.TriggerCondition),
     TriggerUponFoundingReligion("upon founding a Religion", UniqueTarget.TriggerCondition),
@@ -914,10 +986,11 @@ enum class UniqueType(
 
     ///////////////////////////////////////// region 11 UNIT TRIGGERS /////////////////////////////////////////
 
+    TriggerUponCombat("upon entering combat", UniqueTarget.UnitTriggerCondition),
     TriggerUponDamagingUnit("upon damaging a [mapUnitFilter] unit", UniqueTarget.UnitTriggerCondition,
         docDescription = "Can apply triggers to to damaged unit by setting the first parameter to 'Target Unit'"),
     TriggerUponDefeatingUnit("upon defeating a [mapUnitFilter] unit", UniqueTarget.UnitTriggerCondition),
-    TriggerUponExpendingUnit("upon expending a [mapUnitFilter] unit", UniqueTarget.UnitTriggerCondition),
+    TriggerUponExpendingUnit("upon expending a [mapUnitFilter] unit", UniqueTarget.TriggerCondition),
     TriggerUponDefeat("upon being defeated", UniqueTarget.UnitTriggerCondition),
     TriggerUponPromotion("upon being promoted", UniqueTarget.UnitTriggerCondition),
     TriggerUponPromotionGain("upon gaining the [promotion] promotion", UniqueTarget.UnitTriggerCondition),
@@ -935,18 +1008,28 @@ enum class UniqueType(
 
     ConditionalTimedUnique("for [nonNegativeAmount] turns", UniqueTarget.MetaModifier,
         docDescription = "Turns this unique into a trigger, activating this unique as a *global* unique for a number of turns"),
-    
-    AiChoiceWeight("[relativeAmount]% weight to this choice for AI decisions", UniqueTarget.Tech,
-        UniqueTarget.Promotion, UniqueTarget.Policy, flags = UniqueFlag.setOfHiddenToUsers),
-    
+
+    AiChoiceWeight("[relativeAmount]% weight to this choice for AI decisions",
+        UniqueTarget.Building,
+        UniqueTarget.EventChoice,
+        UniqueTarget.FollowerBelief,
+        UniqueTarget.FounderBelief,
+        UniqueTarget.Policy,
+        UniqueTarget.Promotion,
+        UniqueTarget.Tech,
+        flags = UniqueFlag.setOfHiddenToUsers),
+
     HiddenFromCivilopedia("Will not be displayed in Civilopedia", *UniqueTarget.Displayable, flags = UniqueFlag.setOfHiddenToUsers),
     ShowsWhenUnbuilable("Shown while unbuilable", UniqueTarget.Building, UniqueTarget.Unit, flags = UniqueFlag.setOfHiddenToUsers),
     ModifierHiddenFromUsers("hidden from users", UniqueTarget.MetaModifier),
     WillNotBeChosenForNewGames("Will not be chosen for new games", UniqueTarget.Nation),
     
-    ForEveryCountable("for every [countable]", UniqueTarget.MetaModifier),
-    ForEveryAdjacentTile("for every adjacent [tileFilter]", UniqueTarget.MetaModifier),
-    ForEveryAmountCountable("for every [positiveAmount] [countable]", UniqueTarget.MetaModifier),
+    ForEveryCountable("for every [countable]", UniqueTarget.MetaModifier,
+        docDescription = "Works for positive numbers only"),
+    ForEveryAdjacentTile("for every adjacent [tileFilter]", UniqueTarget.MetaModifier,
+        docDescription = "Works for positive numbers only"),
+    ForEveryAmountCountable("for every [positiveAmount] [countable]", UniqueTarget.MetaModifier,
+        docDescription = "Works for positive numbers only"),
     
     ModifiedByGameSpeed("(modified by game speed)", UniqueTarget.MetaModifier,
         docDescription = "Can only be applied to certain uniques, see details of each unique for specifics"),
@@ -961,7 +1044,8 @@ enum class UniqueType(
     AllowCityStatesSpawnUnits("Allow City States to spawn with additional units", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
     TradeCivIntroductions("Can trade civilization introductions for [positiveAmount] Gold", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
     DisableReligion("Disable religion", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
-    CanOnlyStartFromStartingEra("Can only start games from the starting era", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
+    CanOnlyStartFromStartingEra("Can only start games from the starting era", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals,
+        docDescription = "In this case, 'starting era' means the first defined Era in the entire ruleset."),
     AllowRazeCapital("Allow raze capital", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
     AllowRazeHolyCity("Allow raze holy city", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
 
@@ -975,7 +1059,8 @@ enum class UniqueType(
     ModIncompatibleWith("Mod is incompatible with [modFilter]", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals,
         docDescription = "Specifies that your Mod is incompatible with another. Always treated symmetrically, and cannot be overridden by the Mod you are declaring as incompatible."),
     ModRequires("Mod requires [modFilter]", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals,
-        docDescription = "Specifies that your Extension Mod is only available if any other Mod matching the filter is active."),
+        docDescription = "Specifies that your Extension Mod is only available if any other Mod matching the filter is active.\n" +
+        "Multiple copies of this Unique cannot be used to specify alternatives, they work as 'and' logic. If you need alternates and wildcards can't filter them well enough, please open an issue."),
     ModIsAudioVisualOnly("Should only be used as permanent audiovisual mod", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
     ModIsAudioVisual("Can be used as permanent audiovisual mod", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
     ModIsNotAudioVisual("Cannot be used as permanent audiovisual mod", UniqueTarget.ModOptions, flags = UniqueFlag.setOfNoConditionals),
@@ -987,6 +1072,35 @@ enum class UniqueType(
     // endregion
 
     ///////////////////////////////////////////// region 99 DEPRECATED AND REMOVED /////////////////////////////////////////////
+    @Deprecated("As of 4.18.15", ReplaceWith("Receive [+200]% Gold from Barbarian encampments and pillaging Cities"), DeprecationLevel.ERROR)
+    TripleGoldFromEncampmentsAndCities("Receive triple Gold from Barbarian encampments and pillaging Cities", UniqueTarget.Global),
+    @Deprecated("As of 4.18.15", ReplaceWith("[+100]% Gold given to enemy if city is captured <in this city>"), DeprecationLevel.ERROR)
+    DoublesGoldFromCapturingCity("Doubles Gold given to enemy if city is captured", UniqueTarget.Building),
+    @Deprecated("As of 4.17.12", ReplaceWith("upon declaring war on [Major] Civilizations"), DeprecationLevel.ERROR)
+    TriggerUponDeclaringWar("upon declaring war with a major Civilization", UniqueTarget.TriggerCondition),
+    @Deprecated("As of 4.17.4", ReplaceWith("May Paradrop to [Land] tiles up to [positiveAmount] tiles away <in [{Friendly} {Land}] tiles>"), DeprecationLevel.ERROR)
+    MayParadropOld("May Paradrop up to [positiveAmount] tiles from inside friendly territory", UniqueTarget.Unit),
+    @Deprecated("As of 4.16.18", ReplaceWith("[relativeAmount]% [Strategic] resource production"), DeprecationLevel.ERROR)
+    StrategicResourcesIncrease("Quantity of strategic resources produced by the empire +[relativeAmount]%", UniqueTarget.Global),  // used by Policies
+    @Deprecated("As of 4.16.18", ReplaceWith("[+100]% [resource] resource production"), DeprecationLevel.ERROR)
+    DoubleResourceProduced("Double quantity of [resource] produced", UniqueTarget.Global),
+    @Deprecated(message = "as of 4.16.13", ReplaceWith("[relativeAmount]% maintenance cost for [all] buildings [cityFilter]"), level = DeprecationLevel.ERROR)
+    BuildingMaintenanceOld("[relativeAmount]% maintenance cost for buildings [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
+    @Deprecated("As of 4.16.14", ReplaceWith("Removes extra unhappiness from annexed cities"), DeprecationLevel.ERROR)
+    RemoveAnnexUnhappiness("Remove extra unhappiness from annexed cities", UniqueTarget.Building),
+    @Deprecated("As of 4.16.14", ReplaceWith("[relativeAmount]% Strength <when stacked with a [mapUnitFilter] unit>"), DeprecationLevel.ERROR)
+    StrengthWhenStacked("[relativeAmount]% Strength when stacked with [mapUnitFilter]", UniqueTarget.Unit),  // candidate for conditional!
+    @Deprecated("As of 4.16.18", ReplaceWith("when between [amount] and [amount] [Happiness]"), DeprecationLevel.ERROR)
+    ConditionalBetweenHappiness("when between [amount] and [amount] Happiness", UniqueTarget.Conditional,
+        docDescription = " 'Between' is inclusive - so 'between 1 and 5' includes 1 and 5."),
+    @Deprecated("As of 4.16.18", ReplaceWith("when above [amount] [Happiness]"), DeprecationLevel.ERROR)
+    ConditionalAboveHappiness("when above [amount] Happiness", UniqueTarget.Conditional),
+    @Deprecated("As of 4.16.18", ReplaceWith("when below [amount] [Happiness]"), DeprecationLevel.ERROR)
+    ConditionalBelowHappiness("when below [amount] Happiness", UniqueTarget.Conditional),
+    @Deprecated("As of 4.16.0", ReplaceWith("Unavailable <when number of [Completed Policy branches] is less than [amount]>"), DeprecationLevel.ERROR)
+    HiddenBeforeAmountPolicies("Hidden until [amount] social policy branches have been completed", UniqueTarget.Building, UniqueTarget.Unit),
+    @Deprecated("As of 4.15.11", ReplaceWith("New [baseUnitFilter] units start with [amount] XP [cityFilter]"), DeprecationLevel.ERROR)
+    UnitStartingExperienceOld("New [baseUnitFilter] units start with [amount] Experience [cityFilter]", UniqueTarget.Global, UniqueTarget.FollowerBelief),
     @Deprecated("As of 4.15.2", ReplaceWith("Can spend Gold to annex or puppet a City-State that has been your Ally for [amount] turns"), DeprecationLevel.ERROR)
     CityStateCanBeBoughtForGoldOld("Can spend Gold to annex or puppet a City-State that has been your ally for [amount] turns.", UniqueTarget.Global),
     @Deprecated("As of 4.14.6", ReplaceWith("[+100]% Strength <when defending> <when [Embarked]>"), DeprecationLevel.ERROR)
@@ -1441,12 +1555,13 @@ enum class UniqueType(
 
     /** For uniques that have "special" parameters that can accept multiple types, we can override them manually
      *  For 95% of cases, auto-matching is fine. */
+    @Readonly
     open fun parameterTypeMapInitializer(): ArrayList<List<UniqueParameterType>> {
         val map = ArrayList<List<UniqueParameterType>>()
         for (placeholder in text.getPlaceholderParameters()) {
             val matchingParameterTypes = placeholder
                 .split('/')
-                .map { UniqueParameterType.safeValueOf(it.replace(numberRegex, "")) }
+                .mapNotNull { UniqueParameterType.safeValueOf(it.replace(numberRegex, "")) }
             map.add(matchingParameterTypes)
         }
         return map
@@ -1490,13 +1605,15 @@ enum class UniqueType(
          *  first pass that also runs for extension mods without a base mixed in; the complex check
          *  runs with [severityToReport]==[RulesetSpecific].
          */
-        abstract fun getRulesetErrorSeverity(): RulesetErrorSeverity
+        @Readonly abstract fun getRulesetErrorSeverity(): RulesetErrorSeverity
     }
 
+    @Readonly
     fun getDeprecationAnnotation(): Deprecated? = declaringJavaClass.getField(name)
         .getAnnotation(Deprecated::class.java)
 
     /** Checks whether a specific [uniqueTarget] as e.g. given by [IHasUniques.getUniqueTarget] works with `this` UniqueType */
+    @Readonly
     fun canAcceptUniqueTarget(uniqueTarget: UniqueTarget) =
         targetTypes.any { uniqueTarget.canAcceptUniqueTarget(it) }
 

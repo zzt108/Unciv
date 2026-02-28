@@ -1,7 +1,7 @@
 package com.unciv.uniques
 
-import com.badlogic.gdx.math.Vector2
 import com.unciv.logic.civilization.PlayerType
+import com.unciv.logic.map.HexCoord
 import com.unciv.models.ruleset.BeliefType
 import com.unciv.models.ruleset.unique.Unique
 import com.unciv.models.ruleset.unique.UniqueTriggerActivation
@@ -12,6 +12,7 @@ import org.junit.Assert
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.math.roundToInt
 
 
 @RunWith(GdxTestRunner::class)
@@ -32,6 +33,7 @@ class ResourceTests {
         val consumesCoal = game.createBuilding("Consumes [1] [Coal]")
         val doubleCoal = game.createBuilding("Double quantity of [Coal] produced")
         val doubleStrategic = game.createBuilding("Quantity of strategic resources produced by the empire +[100]%")
+        val doubleStrategicProduction = game.createBuilding("[+100]% [Strategic] resource production")
 
         city.cityConstructions.addBuilding(consumesCoal)
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == -1)
@@ -40,6 +42,9 @@ class ResourceTests {
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == -1)
 
         city.cityConstructions.addBuilding(doubleStrategic)
+        Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == -1)
+
+        city.cityConstructions.addBuilding(doubleStrategicProduction)
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == -1)
     }
 
@@ -47,20 +52,16 @@ class ResourceTests {
     fun testResourceProductionAndConsumptionModifierDoesNotAffectConsumption() {
         val consumesCoal = game.createBuilding("Consumes [1] [Coal]")
         val providesCoal = game.createBuilding("Provides [1] [Coal]")
-        val doubleCoal = game.createBuilding("Double quantity of [Coal] produced")
-        val doubleStrategic = game.createBuilding("Quantity of strategic resources produced by the empire +[100]%")
+        val doubleStrategicProduction = game.createBuilding("[+100]% [Strategic] resource production")
 
         city.cityConstructions.addBuilding(providesCoal)
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 1)
-
-        city.cityConstructions.addBuilding(doubleCoal)
+        
+        city.cityConstructions.addBuilding(doubleStrategicProduction)
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 2)
 
-        city.cityConstructions.addBuilding(doubleStrategic)
-        Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 4)
-
         city.cityConstructions.addBuilding(consumesCoal)
-        Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 3) // Produce 4 (1*2*2), consume 1
+        Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 1) // Produce 2, consume 1
     }
 
     @Test
@@ -74,7 +75,7 @@ class ResourceTests {
     @Test
     fun testTileProvidesResourceOnlyWithRequiredTech() {
         val tile = game.tileMap[1,1]
-        tile.resource = "Coal"
+        tile.setTileResource("Coal")
         tile.resourceAmount = 1
         tile.setImprovement("Mine")
 
@@ -90,7 +91,7 @@ class ResourceTests {
     @Test
     fun testTileDoesNotProvideResourceWithPillagedImprovement() {
         val tile = game.tileMap[1,1]
-        tile.resource = "Coal"
+        tile.setTileResource("Coal")
         tile.resourceAmount = 1
         tile.setImprovement("Mine")
 
@@ -120,13 +121,22 @@ class ResourceTests {
         tile.setImprovement(improvement.name, civInfo)
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 1)
 
-        val doubleCoal = game.createBuilding("Double quantity of [Coal] produced")
+        val doubleCoal = game.createBuilding("[+100]% [Coal] resource production")
         city.cityConstructions.addBuilding(doubleCoal)
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 2)
 
-        val doubleStrategic = game.createBuilding("Quantity of strategic resources produced by the empire +[100]%")
+        val doubleStrategic = game.createBuilding("[+100]% [Strategic] resource production")
         city.cityConstructions.addBuilding(doubleStrategic)
+        Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 3)
+
+        val doubleStrategicProduction = game.createBuilding("[+100]% [Strategic] resource production")
+        city.cityConstructions.addBuilding(doubleStrategicProduction)
         Assert.assertTrue(civInfo.getCivResourcesByName()["Coal"] == 4)
+    }
+    
+    @Test
+    fun stringtoint(){
+        assert(1f == "1".toFloat())
     }
 
 
@@ -137,13 +147,13 @@ class ResourceTests {
         civInfo.tech.addTechnology("Iron Working")
         civInfo.tech.addTechnology("Mining")
 
-        val tile = game.getTile(Vector2(1f, 1f))
-        tile.resource = "Iron"
+        val tile = game.getTile(1,1)
+        tile.setTileResource("Iron")
         tile.resourceAmount = 4
         tile.improvement = "Mine"
 
         // when
-        val cityResources = city.getResourcesGeneratedByCity(civInfo.getResourceModifiers())
+        val cityResources = city.getResourcesGeneratedByCity()
 
         // then
         assertEquals(1, cityResources.size)
@@ -165,6 +175,26 @@ class ResourceTests {
     }
 
     @Test
+    fun `should handle StatPercentFromObjectToResource with a buildingFilter`() {
+        city.cityConstructions.addBuilding("Monument")
+        val building = game.createBuilding("[300]% of [Culture] from every [Monument] in the city added to [Iron]")
+        city.cityConstructions.addBuilding(building)
+        assertEquals(6, city.getAvailableResourceAmount("Iron")) // 2 Culture * 3
+    }
+
+    @Test
+    fun `should handle StatPercentFromObjectToResource with a improvementFilter`() {
+        val tile = game.tileMap[1,1]
+        tile.setTileResource("Wheat")
+        tile.resourceAmount = 1
+        tile.setImprovement("Farm")
+        city.population.addPopulation(5) // Add population, since the tile needs to be worked
+        val building = game.createBuilding("[300]% of [Food] from every [Farm] in the city added to [Iron]")
+        city.cityConstructions.addBuilding(building)
+        assertEquals(3, city.getAvailableResourceAmount("Iron"))
+    }
+
+    @Test
     fun `should reduce resources due to buildings`() {
         // given
         city.cityConstructions.addBuilding("Factory")
@@ -183,7 +213,7 @@ class ResourceTests {
         val building = game.createBuilding("Provides [4] [Coal]")
         city.cityConstructions.addBuilding(building)
 
-        val otherCity = civInfo.addCity(Vector2(2f,2f))
+        val otherCity = civInfo.addCity(HexCoord(2,2))
 
         // when
         val resourceAmountInOtherCity = otherCity.getAvailableResourceAmount("Coal")
@@ -200,7 +230,7 @@ class ResourceTests {
         val building = game.createBuilding("Provides [4] [${resource.name}]")
         city.cityConstructions.addBuilding(building)
 
-        val otherCity = civInfo.addCity(Vector2(2f,2f))
+        val otherCity = civInfo.addCity(HexCoord(2,2))
 
         // when
         val resourceAmountInOtherCity = otherCity.getAvailableResourceAmount(resource.name)
@@ -232,7 +262,7 @@ class ResourceTests {
         religion.addBeliefs(listOf(belief))
         city.population.setPopulation(1)
         city.religion.addPressure(religion.name, 1000)
-        val otherCity = civInfo.addCity(Vector2(2f,2f)) // NOT religionized
+        val otherCity = civInfo.addCity(HexCoord(2,2)) // NOT religionized
 
         // when
         val resourceAmountInCapital = city.getAvailableResourceAmount("Iron")
@@ -285,9 +315,9 @@ class ResourceTests {
         
         val consumingBuilding = game.createBuilding("Costs [1] [${resource.name}]")
         assert(civInfo.getCivResourcesByName()[resource.name] == 2) // no change yet
-        city.cityConstructions.currentConstructionFromQueue = consumingBuilding.name
+        city.cityConstructions.setCurrentConstruction(consumingBuilding.name)
         civInfo.playerType = PlayerType.Human // to not loop endlessly on "next turn"
-        game.gameInfo.currentPlayer = civInfo.civName
+        game.gameInfo.currentPlayer = civInfo.civID
         game.gameInfo.currentPlayerCiv = civInfo
         game.gameInfo.nextTurn()
         assert(civInfo.getCivResourcesByName()[resource.name] == 1) // 1 was consumed because production started
@@ -304,5 +334,23 @@ class ResourceTests {
         val building = game.createBuilding("Instantly provides [2] [${resource.name}]")
         city.cityConstructions.addBuilding(building)
         assert(consumingBuilding.isBuildable(city.cityConstructions))
+    }
+
+    @Test
+    fun `Set stockpile to countable`() {
+        // given
+        val resource = game.createResource(UniqueType.Stockpiled.text)
+        val building = game.createBuilding("Instantly provides [2] [${resource.name}]")
+        city.cityConstructions.addBuilding(building)
+        assertEquals(2, civInfo.getCivResourcesByName()[resource.name])
+
+        // when
+        UniqueTriggerActivation.triggerUnique(
+            Unique("Set [${resource.name}] to [1+1]"),
+            civInfo
+        )
+
+        // then
+        assertEquals(2, civInfo.getCivResourcesByName()[resource.name])
     }
 }

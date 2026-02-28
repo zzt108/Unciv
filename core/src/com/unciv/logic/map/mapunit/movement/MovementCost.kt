@@ -6,11 +6,13 @@ import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.mapunit.MapUnitCache
 import com.unciv.logic.map.tile.RoadStatus
 import com.unciv.logic.map.tile.Tile
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
+import yairm210.purity.annotations.Readonly
 
 object MovementCost {
 
+    @Readonly
     fun getMovementCostBetweenAdjacentTilesEscort(
         unit: MapUnit,
         from: Tile,
@@ -33,6 +35,7 @@ object MovementCost {
      * Does not include escort unit
      * @return The cost of movment for the unit between two tiles
      */
+    @Readonly
     fun getMovementCostBetweenAdjacentTiles(
         unit: MapUnit,
         from: Tile,
@@ -88,9 +91,9 @@ object MovementCost {
         if (unit.cache.noTerrainMovementUniques)
             return terrainCost + extraCost
 
-        val stateForConditionals = StateForConditionals(unit.civ, unit = unit, tile = to)
+        val gameContext = GameContext(unit.civ, unit = unit, tile = to)
 
-        if (to.terrainFeatures.any { hasDoubleMovement(unit, it, MapUnitCache.DoubleMovementTerrainTarget.Feature, stateForConditionals) })
+        if (to.terrainFeatures.any { hasDoubleMovement(unit, it, MapUnitCache.DoubleMovementTerrainTarget.Feature, gameContext) })
             return terrainCost * 0.5f + extraCost
 
         if (unit.cache.roughTerrainPenalty && to.isRoughTerrain())
@@ -103,16 +106,16 @@ object MovementCost {
         if (unit.cache.noBaseTerrainOrHillDoubleMovementUniques)
             return terrainCost + extraCost
 
-        if (hasDoubleMovement(unit, to.baseTerrain, MapUnitCache.DoubleMovementTerrainTarget.Base, stateForConditionals))
+        if (hasDoubleMovement(unit, to.baseTerrain, MapUnitCache.DoubleMovementTerrainTarget.Base, gameContext))
             return terrainCost * 0.5f + extraCost
-        if (hasDoubleMovement(unit, Constants.hill, MapUnitCache.DoubleMovementTerrainTarget.Hill, stateForConditionals)
+        if (hasDoubleMovement(unit, Constants.hill, MapUnitCache.DoubleMovementTerrainTarget.Hill, gameContext)
             && to.isHill())
             return terrainCost * 0.5f + extraCost
 
         if (unit.cache.noFilteredDoubleMovementUniques)
             return terrainCost + extraCost
         if (unit.cache.doubleMovementInTerrain.any {
-                hasDoubleMovement(it.value, MapUnitCache.DoubleMovementTerrainTarget.Filter, stateForConditionals)
+                hasDoubleMovement(it.value, MapUnitCache.DoubleMovementTerrainTarget.Filter, gameContext)
                     && to.matchesFilter(it.key)
             })
             return terrainCost * 0.5f + extraCost
@@ -120,29 +123,31 @@ object MovementCost {
         return terrainCost + extraCost // no road or other movement cost reduction
     }
 
-
+    @Readonly
     private fun hasDoubleMovement(
         doubleMovement: MapUnitCache.DoubleMovement,
         target: MapUnitCache.DoubleMovementTerrainTarget,
-        stateForConditionals: StateForConditionals
+        gameContext: GameContext
     ): Boolean {
         if (doubleMovement.terrainTarget != target) return false
         if (doubleMovement.unique.modifiers.isNotEmpty()
-            && !doubleMovement.unique.conditionalsApply(stateForConditionals)) return false
+            && !doubleMovement.unique.conditionalsApply(gameContext)) return false
 
         return true
     }
 
+    @Readonly
     private fun hasDoubleMovement(
         unit: MapUnit,
         terrainName: String,
         target: MapUnitCache.DoubleMovementTerrainTarget,
-        stateForConditionals: StateForConditionals
+        gameContext: GameContext
     ): Boolean {
         val doubleMovement = unit.cache.doubleMovementInTerrain[terrainName] ?: return false
-        return hasDoubleMovement(doubleMovement, target, stateForConditionals)
+        return hasDoubleMovement(doubleMovement, target, gameContext)
     }
 
+    @Readonly
     private fun getEnemyMovementPenalty(civInfo: Civilization, enemyUnit: MapUnit): Float {
         if (civInfo.enemyMovementPenaltyUniques != null && civInfo.enemyMovementPenaltyUniques!!.any()) {
             return civInfo.enemyMovementPenaltyUniques!!.sumOf {
@@ -157,6 +162,7 @@ object MovementCost {
 
 
     /** Returns whether the movement between the adjacent tiles [from] and [to] is affected by Zone of Control */
+    @Readonly
     private fun isMovementAffectedByZoneOfControl(unit: MapUnit, from: Tile, to: Tile): Boolean {
         // Sources:
         // - https://civilization.fandom.com/wiki/Zone_of_control_(Civ5)
@@ -186,6 +192,7 @@ object MovementCost {
         return true
     }
 
+    @Readonly
     private fun anyTilesExertingZoneOfControl(unit: MapUnit, from: Tile, to:Tile): Boolean {
         for (neighbor in from.neighbors) {
             if (neighbor.isCityCenter()) {

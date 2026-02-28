@@ -1,11 +1,18 @@
 package com.unciv.logic
 
+import yairm210.purity.annotations.LocalState
+import yairm210.purity.annotations.Readonly
+import yairm210.purity.annotations.Pure
+
 object MultiFilter {
-    private const val andPrefix = "{"
+    private const val andPrefixChar = '{'
+    private const val andPrefix = andPrefixChar.toString()
     private const val andSeparator = "} {"
-    private const val andSuffix = "}"
+    private const val andSuffixChar = '}'
+    private const val andSuffix = andSuffixChar.toString()
     private const val notPrefix = "non-["
-    private const val notSuffix = "]"
+    private const val notSuffixChar = ']'
+    private const val notSuffix = notSuffixChar.toString()
 
     /**
      *  Implements `and` and `not` logic on top of a [filterFunction].
@@ -17,34 +24,38 @@ object MultiFilter {
      *  @param filterFunction The single filter implementation
      *  @param forUniqueValidityTests Inverts the `non-[filter]` test because Unique validity doesn't check for actual matching
      */
+    @Readonly
     fun multiFilter(
         input: String,
-        filterFunction: (String) -> Boolean,
+        @Readonly filterFunction: (String) -> Boolean,
         forUniqueValidityTests: Boolean = false
     ): Boolean {
-        if (input.hasSurrounding(andPrefix, andSuffix) && input.contains(andSeparator))
-            return input.removeSurrounding(andPrefix, andSuffix).split(andSeparator)
+        if (isAnd(input))
+            return getAndFilters(input)
                 .all { multiFilter(it, filterFunction, forUniqueValidityTests) }
-        if (input.hasSurrounding(notPrefix, notSuffix)) {
+        if (isNot(input)) {
             //same as `return multiFilter() == forUniqueValidityTests`, but clearer
-            val internalResult = multiFilter(input.removeSurrounding(notPrefix, notSuffix), filterFunction, forUniqueValidityTests)
+            val internalResult = multiFilter(getNotFilter(input), filterFunction, forUniqueValidityTests)
             return if (forUniqueValidityTests) internalResult else !internalResult
         }
         return filterFunction(input)
     }
 
+    @Pure
     fun getAllSingleFilters(input: String): Sequence<String> = when {
-        input.hasSurrounding(andPrefix, andSuffix) && input.contains(andSeparator) ->
+        isAnd(input) -> {
             // Resolve "AND" filters
-            input.removeSurrounding(andPrefix, andSuffix)
-                .splitToSequence(andSeparator)
-                .flatMap { getAllSingleFilters(it) }
-        input.hasSurrounding(notPrefix, notSuffix) ->
+            @LocalState val filters = getAndFilters(input)
+            filters.flatMap { getAllSingleFilters(it) }
+        }
+        isNot(input) ->
             // Simply remove "non" syntax
-            getAllSingleFilters(input.removeSurrounding(notPrefix, notSuffix))
+            getAllSingleFilters(getNotFilter(input))
         else -> sequenceOf(input)
     }
-
-    fun String.hasSurrounding(prefix: String, suffix: String) =
-        startsWith(prefix) && endsWith(suffix)
+    
+    @Pure fun isAnd(input: String) = input.startsWith(andPrefixChar) && input.endsWith(andSuffixChar) && input.contains(andSeparator)
+    @Pure fun getAndFilters(input: String) = input.removeSurrounding(andPrefix, andSuffix).splitToSequence(andSeparator)
+    @Pure fun isNot(input: String) = input.endsWith(notSuffixChar) && input.startsWith(notPrefix)
+    @Pure fun getNotFilter(input: String) = input.removeSurrounding(notPrefix, notSuffix)
 }

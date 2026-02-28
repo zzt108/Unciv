@@ -3,12 +3,14 @@ package com.unciv.logic.civilization
 import com.badlogic.gdx.math.Rectangle
 import com.badlogic.gdx.math.Vector2
 import com.unciv.logic.IsPartOfGameInfoSerialization
+import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.HexMath.getLatitude
 import com.unciv.logic.map.HexMath.getLongitude
 import com.unciv.logic.map.HexMath.worldFromLatLong
 import com.unciv.logic.map.MapParameters
 import com.unciv.logic.map.MapShape
 import com.unciv.ui.components.tilegroups.TileGroupMap
+import yairm210.purity.annotations.Readonly
 import kotlin.math.abs
 import kotlin.math.sqrt
 
@@ -57,14 +59,14 @@ class ExploredRegion : IsPartOfGameInfoSerialization {
     private var bottomRight = Vector2()
 
     // Getters
-    fun shouldRecalculateCoords(): Boolean = shouldRecalculateCoords
-    fun shouldUpdateMinimap(): Boolean = shouldUpdateMinimap
-    fun getRectangle(): Rectangle = exploredRectangle
-    fun shouldRestrictX(): Boolean = shouldRestrictX
-    fun getLeftX(): Float = topLeftStage.x
-    fun getRightX(): Float = bottomRightStage.x
-    fun getTopY(): Float = topLeftStage.y
-    fun getBottomY(): Float = bottomRightStage.y
+    @Readonly fun shouldRecalculateCoords(): Boolean = shouldRecalculateCoords
+    @Readonly fun shouldUpdateMinimap(): Boolean = shouldUpdateMinimap
+    @Readonly fun getRectangle(): Rectangle = exploredRectangle
+    @Readonly fun shouldRestrictX(): Boolean = shouldRestrictX
+    @Readonly fun getLeftX(): Float = topLeftStage.x
+    @Readonly fun getRightX(): Float = bottomRightStage.x
+    @Readonly fun getTopY(): Float = topLeftStage.y
+    @Readonly fun getBottomY(): Float = bottomRightStage.y
 
     fun clone(): ExploredRegion {
         val toReturn = ExploredRegion()
@@ -87,10 +89,10 @@ class ExploredRegion : IsPartOfGameInfoSerialization {
     }
 
     // Check if tilePosition is beyond explored region
-    fun checkTilePosition(tilePosition: Vector2, explorerPosition: Vector2?) {
+    fun checkTilePosition(tilePosition: HexCoord, explorerPosition: HexCoord?) {
         var mapExplored = false
-        var longitude = getLongitude(tilePosition)
-        val latitude = getLatitude(tilePosition)
+        var longitude = getLongitude(tilePosition).toFloat()
+        val latitude = getLatitude(tilePosition).toFloat()
 
         // First time call
         if (topLeft == Vector2.Zero && bottomRight == Vector2.Zero) {
@@ -201,7 +203,8 @@ class ExploredRegion : IsPartOfGameInfoSerialization {
         exploredRectangle.height = getHeight() * yOffset
     }
 
-    fun isPositionInRegion(postition: Vector2): Boolean {
+    @Readonly
+    fun isPositionInRegion(postition: HexCoord): Boolean {
         val long = getLongitude(postition)
         val lat = getLatitude(postition)
         return if (topLeft.x > bottomRight.x)
@@ -210,6 +213,7 @@ class ExploredRegion : IsPartOfGameInfoSerialization {
                 (((long >= topLeft.x && long >= bottomRight.x) || (long <= topLeft.x && long <= bottomRight.x)) && lat <= topLeft.y && lat >= bottomRight.y)
     }
 
+    @Readonly
     fun getWidth(): Int {
         val result: Float
         if (topLeft.x > bottomRight.x) result = topLeft.x - bottomRight.x
@@ -217,7 +221,7 @@ class ExploredRegion : IsPartOfGameInfoSerialization {
         return result.toInt() + 1
     }
 
-    fun getHeight(): Int = (topLeft.y - bottomRight.y).toInt() + 1
+    @Readonly fun getHeight(): Int = (topLeft.y - bottomRight.y).toInt() + 1
 
     fun getMinimapLeft(tileSize: Float): Float {
         shouldUpdateMinimap = false

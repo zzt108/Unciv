@@ -10,16 +10,14 @@ import com.unciv.UncivGame
 import com.unciv.logic.civilization.AlertType
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.PopupAlert
-import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
-import com.unciv.logic.civilization.diplomacy.DiplomacyManager
-import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
-import com.unciv.logic.civilization.diplomacy.RelationshipLevel
+import com.unciv.logic.civilization.diplomacy.*
 import com.unciv.logic.civilization.managers.AssignedQuest
 import com.unciv.logic.trade.TradeLogic
 import com.unciv.logic.trade.TradeOffer
 import com.unciv.logic.trade.TradeOfferType
 import com.unciv.models.ruleset.Quest
 import com.unciv.models.ruleset.tile.ResourceType
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.UncivTooltip.Companion.addTooltip
@@ -80,12 +78,12 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         val diplomaticMarriageButton = getDiplomaticMarriageButton(otherCiv)
         if (diplomaticMarriageButton != null) diplomacyTable.add(diplomaticMarriageButton).row()
 
-        for (assignedQuest in otherCiv.questManager.getAssignedQuestsFor(viewingCiv.civName)) {
+        for (assignedQuest in otherCiv.questManager.getAssignedQuestsFor(viewingCiv)) {
             diplomacyTable.addSeparator()
             diplomacyTable.add(getQuestTable(assignedQuest)).row()
         }
 
-        for (target in otherCiv.getKnownCivs().filter { otherCiv.questManager.warWithMajorActive(it) && viewingCiv != it }) {
+        for (target in otherCiv.getKnownCivs().filter { otherCiv.questManager.isWarWithMajorActive(it) && viewingCiv != it }) {
             diplomacyTable.addSeparator()
             diplomacyTable.add(getWarWithMajorTable(target, otherCiv)).row()
         }
@@ -128,13 +126,14 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         diplomacyTable.row().padTop(15f)
 
         otherCiv.cityStateFunctions.updateAllyCivForCityState()
-        var ally = otherCiv.getAllyCiv()
+        val ally = otherCiv.allyCiv
         if (ally != null) {
             val allyInfluence = otherCiv.getDiplomacyManager(ally)!!.getInfluence().toInt()
-            if (!viewingCiv.knows(ally) && ally != viewingCiv.civName)
-                ally = "Unknown civilization"
+            val allyName = if (!viewingCiv.knows(ally) && ally != viewingCiv)
+                "Unknown civilization"
+            else ally.civName
             diplomacyTable
-                .add("Ally: [$ally] with [$allyInfluence] Influence".toLabel())
+                .add("Ally: [$allyName] with [$allyInfluence] Influence".toLabel())
                 .row()
         }
 
@@ -156,7 +155,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         val nextLevelString = when {
             atWar -> ""
             otherCivDiplomacyManager.getInfluence().toInt() < 30 -> "Reach 30 for friendship."
-            ally == viewingCiv.civName -> ""
+            ally == viewingCiv -> ""
             else -> "Reach highest influence above 60 for alliance."
         }
         diplomacyTable.add(diplomacyScreen.getRelationshipTable(otherCivDiplomacyManager)).row()
@@ -174,21 +173,26 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
                     .row()
         }
 
-        fun getBonusText(header: String, level: RelationshipLevel): String {
-            val bonuses = viewingCiv.cityStateFunctions
-                .getCityStateBonuses(otherCiv.cityStateType, level)
+        fun addBonusLabels(header: String, bonusLevel: RelationshipLevel, currentRelationLevel: RelationshipLevel) {
+
+            val bonuses = CityStateFunctions
+                .getCityStateBonuses(otherCiv.cityStateType, bonusLevel)
                 .filterNot { it.isHiddenToUsers() }
-            if (bonuses.none()) return ""
-            return (sequenceOf(header) + bonuses.map { it.getDisplayText() }).joinToString(separator = "\n") { it.tr() }
+            if (bonuses.none()) return
+            
+            val headerColor = if (currentRelationLevel == bonusLevel) Color.GREEN else Color.WHITE
+            diplomacyTable.add(header.toLabel(fontColor = headerColor).apply { setAlignment(Align.center) }).row()
+            val gameContext = GameContext(viewingCiv)
+            for (bonus in bonuses) {
+                val bonusLabelColor = if (currentRelationLevel == bonusLevel && bonus.conditionalsApply(gameContext))
+                    Color.GREEN else Color.GRAY
+                val bonusLabel = ColorMarkupLabel(bonus.getDisplayText(), bonusLabelColor)
+                    .apply { setAlignment(Align.center) }
+                diplomacyTable.add(bonusLabel).row()
+            }
         }
-        fun addBonusLabel(header: String, bonusLevel: RelationshipLevel, relationLevel: RelationshipLevel) {
-            val bonusLabelColor = if (relationLevel == bonusLevel) Color.GREEN else Color.GRAY
-            val bonusLabel = ColorMarkupLabel(getBonusText(header, bonusLevel), bonusLabelColor)
-                .apply { setAlignment(Align.center) }
-            diplomacyTable.add(bonusLabel).row()
-        }
-        addBonusLabel("When Friends:", RelationshipLevel.Friend, relationLevel)
-        addBonusLabel("When Allies:", RelationshipLevel.Ally, relationLevel)
+        addBonusLabels("When Friends:", RelationshipLevel.Friend, relationLevel)
+        addBonusLabels("When Allies:", RelationshipLevel.Ally, relationLevel)
 
         if (otherCiv.cityStateUniqueUnit != null) {
             val unitName = otherCiv.cityStateUniqueUnit
@@ -259,9 +263,9 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
                 diplomacyScreen.updateRightSide(otherCiv)
             }.open()
         }
-        val cityStatesAlly = otherCiv.getAllyCiv()
+        val cityStatesAlly = otherCiv.allyCiv
         val atWarWithItsAlly = viewingCiv.getKnownCivs()
-            .any { it.civName == cityStatesAlly && it.isAtWarWith(viewingCiv) }
+            .any { it == cityStatesAlly && it.isAtWarWith(viewingCiv) }
         if (diplomacyScreen.isNotPlayersTurn() || atWarWithItsAlly) peaceButton.disable()
 
         if (otherCivDiplomacyManager.hasFlag(DiplomacyFlags.DeclaredWar)) {
@@ -285,8 +289,8 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
 
         for (improvableTile in improvableResourceTiles)
             for (tileImprovement in improvements.values)
-                if (improvableTile.tileResource.isImprovedBy(tileImprovement.name)
-                    && improvableTile.improvementFunctions.canBuildImprovement(tileImprovement, otherCiv)
+                if (improvableTile.tileResource!!.isImprovedBy(tileImprovement.name)
+                    && improvableTile.improvementFunctions.canBuildImprovement(tileImprovement, otherCiv.state)
                 )
                     needsImprovements = true
 
@@ -349,10 +353,11 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         return diplomacyTable
     }
 
-    private fun getImprovableResourceTiles(otherCiv:Civilization) = otherCiv.getCapital()!!.getTiles().filter {
-        it.hasViewableResource(otherCiv)
-            && it.tileResource.resourceType != ResourceType.Bonus
-            && (it.improvement == null || !it.tileResource.isImprovedBy(it.improvement!!))
+    private fun getImprovableResourceTiles(otherCiv:Civilization) = otherCiv.cities.flatMap { it.getTiles() }.filter {
+        val resource = it.tileResource
+        otherCiv.canSeeResource(resource) &&
+            resource.resourceType != ResourceType.Bonus &&
+            (it.improvement == null || !resource.isImprovedBy(it.improvement!!))
     }
 
     private fun getImprovementGiftTable(otherCiv: Civilization): Table {
@@ -365,8 +370,8 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
 
         for (improvableTile in improvableResourceTiles) {
             for (tileImprovement in tileImprovements.values) {
-                if (improvableTile.tileResource.isImprovedBy(tileImprovement.name)
-                    && improvableTile.improvementFunctions.canBuildImprovement(tileImprovement, otherCiv)
+                if (improvableTile.tileResource!!.isImprovedBy(tileImprovement.name)
+                    && improvableTile.improvementFunctions.canBuildImprovement(tileImprovement, otherCiv.state)
                 ) {
                     val improveTileButton =
                         "Build [${tileImprovement}] on [${improvableTile.tileResource}] (200 Gold)".toTextButton()
@@ -443,7 +448,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         val questTable = Table()
         questTable.defaults().pad(10f)
 
-        val quest: Quest = viewingCiv.gameInfo.ruleset.quests[assignedQuest.questName]!!
+        val quest: Quest = assignedQuest.quest
         val remainingTurns: Int = assignedQuest.getRemainingTurns()
         val title = if (quest.influence > 0)
             "[${quest.name}] (+[${quest.influence.toInt()}] influence)"
@@ -457,7 +462,7 @@ class CityStateDiplomacyTable(private val diplomacyScreen: DiplomacyScreen) {
         if (quest.duration > 0)
             questTable.add("[${remainingTurns}] turns remaining".toLabel()).row()
         if (quest.isGlobal()) {
-            val leaderString = viewingCiv.gameInfo.getCivilization(assignedQuest.assigner).questManager.getScoreStringForGlobalQuest(assignedQuest)
+            val leaderString = assignedQuest.assignerCiv.questManager.getScoreStringForGlobalQuest(assignedQuest)
             if (leaderString.isNotEmpty())
                 questTable.add(leaderString.toLabel()).row()
         }

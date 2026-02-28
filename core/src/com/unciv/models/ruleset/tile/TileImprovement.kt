@@ -7,13 +7,15 @@ import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.RoadStatus
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.RulesetStatsObject
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueTarget
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.BaseUnit
 import com.unciv.ui.components.extensions.toPercent
 import com.unciv.ui.objectdescriptions.ImprovementDescriptions
 import com.unciv.ui.screens.civilopediascreen.FormattedLine
+import yairm210.purity.annotations.LocalState
+import yairm210.purity.annotations.Readonly
 import kotlin.math.roundToInt
 
 class TileImprovement : RulesetStatsObject() {
@@ -29,8 +31,9 @@ class TileImprovement : RulesetStatsObject() {
 
     override fun legacyRequiredTechs() = if (techRequired == null) emptySequence() else sequenceOf(techRequired!!)
 
+    @Readonly
     fun getTurnsToBuild(civInfo: Civilization, unit: MapUnit): Int {
-        val state = StateForConditionals(civInfo, unit = unit)
+        val state = GameContext(civInfo, unit = unit)
         
         val buildSpeedUniques = unit.getMatchingUniques(UniqueType.SpecificImprovementTime, state, checkCivInfoUniques = true)
             .filter { matchesFilter(it.params[1], state) }
@@ -50,16 +53,12 @@ class TileImprovement : RulesetStatsObject() {
     fun getDescription(ruleset: Ruleset): String  = ImprovementDescriptions.getDescription(this, ruleset)
     fun getShortDecription() = ImprovementDescriptions.getShortDescription(this)
 
-    fun isGreatImprovement() = hasUnique(UniqueType.GreatImprovement)
-    fun isRoad() = RoadStatus.entries.any { it != RoadStatus.None && it.name == this.name }
-    fun isAncientRuinsEquivalent() = hasUnique(UniqueType.IsAncientRuinsEquivalent)
+    @Readonly fun isGreatImprovement() = hasUnique(UniqueType.GreatImprovement)
+    @Readonly fun isRoad() = RoadStatus.entries.any { it != RoadStatus.None && it.name == this.name }
+    @Readonly fun isAncientRuinsEquivalent(state: GameContext? = GameContext.IgnoreConditionals) = hasUnique(UniqueType.IsAncientRuinsEquivalent, state)
 
-    fun canBeBuiltOn(terrain: String): Boolean {
-        return terrain in terrainsCanBeBuiltOn
-    }
-    fun canBeBuiltOn(terrain: Terrain): Boolean {
-        return terrainsCanBeBuiltOn.any{ terrain.matchesFilter(it) }
-    }
+    @Readonly fun canBeBuiltOn(terrain: String): Boolean = terrain in terrainsCanBeBuiltOn
+    @Readonly fun canBeBuiltOn(terrain: Terrain): Boolean = terrainsCanBeBuiltOn.any { terrain.matchesFilter(it) }
 
     /**
      * Check: Is this improvement allowed on a [given][name] terrain feature?
@@ -71,23 +70,26 @@ class TileImprovement : RulesetStatsObject() {
      * so this check is done in conjunction - for the user, success means he does not need to remove
      * a terrain feature, thus the unique name.
      */
+    @Readonly
     fun isAllowedOnFeature(terrain: Terrain) = canBeBuiltOn(terrain)
         || getMatchingUniques(UniqueType.NoFeatureRemovalNeeded).any { terrain.matchesFilter(it.params[0]) }
 
 
 
     /** Implements [UniqueParameterType.ImprovementFilter][com.unciv.models.ruleset.unique.UniqueParameterType.ImprovementFilter] */
-    fun matchesFilter(filter: String, tileState: StateForConditionals? = null, multiFilter: Boolean = true): Boolean {
+    @Readonly
+    fun matchesFilter(filter: String, tileState: GameContext? = null, multiFilter: Boolean = true): Boolean {
         return if (multiFilter) MultiFilter.multiFilter(filter, {
             matchesSingleFilter(it) ||
-                tileState != null && hasUnique(it, tileState) ||
+                tileState != null && hasTagUnique(it, tileState) ||
                 tileState == null && hasTagUnique(it)
         })
         else matchesSingleFilter(filter) ||
-            tileState != null && hasUnique(filter, tileState) ||
+            tileState != null && hasTagUnique(filter, tileState) ||
             tileState == null && hasTagUnique(filter)
     }
 
+    @Readonly
     private fun matchesSingleFilter(filter: String): Boolean {
         return when (filter) {
             "all", "All" -> true
@@ -103,6 +105,22 @@ class TileImprovement : RulesetStatsObject() {
     override fun getCivilopediaTextLines(ruleset: Ruleset): List<FormattedLine> =
         ImprovementDescriptions.getCivilopediaTextLines(this, ruleset)
 
+    override fun getSortGroup(ruleset: Ruleset) = when {
+        isGreatImprovement() -> 1
+        name.startsWith("Cancel ") -> 2
+        name.startsWith("Remove ") -> 2
+        name == "Repair" -> 2
+        else -> 0
+    }
+    override fun getSubCategory(ruleset: Ruleset): String? = when {
+        isGreatImprovement() -> "Great Improvement"
+        name.startsWith("Cancel ") -> "Action"
+        name.startsWith("Remove ") -> "Action"
+        name == "Repair" -> "Action"
+        else -> "Tile Improvements"
+    }
+
+    @Readonly
     fun getConstructorUnits(ruleset: Ruleset): List<BaseUnit> {
         //todo Why does this have to be so complicated? A unit's "Can build [Land] improvements on tiles"
         //     creates the _justified_ expectation that an improvement it can build _will_ have
@@ -112,10 +130,11 @@ class TileImprovement : RulesetStatsObject() {
 
         val canOnlyFilters = getMatchingUniques(UniqueType.CanOnlyBeBuiltOnTile)
             .map { it.params[0].run { if (this == "Coastal") "Land" else this } }.toSet()
+        
         val cannotFilters = getMatchingUniques(UniqueType.CannotBuildOnTile).map { it.params[0] }.toSet()
         val resourcesImprovedByThis = ruleset.tileResources.values.filter { it.isImprovedBy(name) }
 
-        val expandedTerrainsCanBeBuiltOn = sequence {
+        @LocalState val expandedTerrainsCanBeBuiltOn = sequence {
             yieldAll(terrainsCanBeBuiltOn)
             yieldAll(terrainsCanBeBuiltOn.asSequence().mapNotNull { ruleset.terrains[it] }.flatMap { it.occursOn.asSequence() })
             if (hasUnique(UniqueType.CanOnlyImproveResource))
@@ -135,12 +154,14 @@ class TileImprovement : RulesetStatsObject() {
                 .filter { it.name in expandedTerrainsCanBeBuiltOn })
         }.filter { it.name !in cannotFilters }.toMutableSet()
 
+        
         if (canOnlyFilters.isNotEmpty() && canOnlyFilters.intersect(expandedTerrainsCanBeBuiltOn).isEmpty()) {
             expandedTerrainsCanBeBuiltOn.clear()
             if (terrainsCanBeBuiltOnTypes.none { it.name in canOnlyFilters })
                 terrainsCanBeBuiltOnTypes.clear()
         }
 
+        @Readonly
         fun matchesBuildImprovementsFilter(filter: String) =
             matchesFilter(filter) ||
             filter in expandedTerrainsCanBeBuiltOn ||
@@ -149,17 +170,18 @@ class TileImprovement : RulesetStatsObject() {
         return ruleset.units.values.asSequence()
             .filter { unit ->
                 turnsToBuild != -1
-                    && unit.getMatchingUniques(UniqueType.BuildImprovements, StateForConditionals.IgnoreConditionals)
+                    && unit.getMatchingUniques(UniqueType.BuildImprovements, GameContext.IgnoreConditionals)
                         .any { matchesBuildImprovementsFilter(it.params[0]) }
                 || unit.hasUnique(UniqueType.CreateWaterImprovements)
                     && terrainsCanBeBuiltOnTypes.contains(TerrainType.Water)
             }.toList()
     }
 
+    @Readonly
     fun getCreatingUnits(ruleset: Ruleset): List<BaseUnit> {
         return ruleset.units.values.asSequence()
             .filter { unit ->
-                unit.getMatchingUniques(UniqueType.ConstructImprovementInstantly, StateForConditionals.IgnoreConditionals)
+                unit.getMatchingUniques(UniqueType.ConstructImprovementInstantly, GameContext.IgnoreConditionals)
                     .any { it.params[0] == name }
             }.toList()
     }

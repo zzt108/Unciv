@@ -21,7 +21,13 @@ import com.unciv.models.UncivSound
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
 import com.unciv.ui.audio.SoundPlayer
-import com.unciv.ui.components.extensions.*
+import com.unciv.ui.components.extensions.addBorderAllowOpacity
+import com.unciv.ui.components.extensions.addRoundCloseButton
+import com.unciv.ui.components.extensions.addSeparator
+import com.unciv.ui.components.extensions.disable
+import com.unciv.ui.components.extensions.setSize
+import com.unciv.ui.components.extensions.toLabel
+import com.unciv.ui.components.extensions.toTextButton
 import com.unciv.ui.components.fonts.Fonts
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.widgets.UnitIconGroup
@@ -32,6 +38,7 @@ import com.unciv.ui.screens.worldscreen.WorldScreen
 import com.unciv.ui.screens.worldscreen.bottombar.BattleTableHelpers.battleAnimationDeferred
 import com.unciv.ui.screens.worldscreen.bottombar.BattleTableHelpers.getHealthBar
 import com.unciv.utils.DebugUtils
+import yairm210.purity.annotations.Readonly
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -91,6 +98,7 @@ class BattleTable(val worldScreen: WorldScreen) : Table() {
 
     }
 
+    @Readonly
     private fun tryGetAttacker(): ICombatant? {
         val unitTable = worldScreen.bottomUnitTable
         return if (unitTable.selectedUnit != null
@@ -102,11 +110,13 @@ class BattleTable(val worldScreen: WorldScreen) : Table() {
         else null // no attacker
     }
 
+    @Readonly
     private fun tryGetDefender(): ICombatant? {
         val selectedTile = worldScreen.mapHolder.selectedTile ?: return null // no selected tile
         return tryGetDefenderAtTile(selectedTile, false)
     }
 
+    @Readonly
     private fun tryGetDefenderAtTile(selectedTile: Tile, includeFriendly: Boolean): ICombatant? {
         val attackerCiv = worldScreen.viewingCiv
         val defender: ICombatant? = Battle.getMapCombatantOfTile(selectedTile)
@@ -168,8 +178,8 @@ class BattleTable(val worldScreen: WorldScreen) : Table() {
             if (attacker.isRanged() && defender.isRanged() && !defender.isCity() && !(defender is MapUnitCombatant && defender.unit.isEmbarked()))
                 Fonts.rangedStrength
             else Fonts.strength // use strength icon if attacker is melee, defender is melee, defender is a city, or defender is embarked
-        add(attacker.getAttackingStrength().tr() + attackIcon)
-        add(defender.getDefendingStrength(attacker.isRanged()).tr() + defenceIcon).row()
+        add(attacker.getAttackingStrength(defender).tr() + attackIcon)
+        add(defender.getDefendingStrength(attacker).tr() + defenceIcon).row()
 
         val attackerModifiers =
                 BattleDamage.getAttackModifiers(attacker, defender, tileToAttackFrom).map {
@@ -307,7 +317,9 @@ class BattleTable(val worldScreen: WorldScreen) : Table() {
         //Gdx.graphics.requestRendering()  // Use this if immediate rendering is required
 
         if (!canStillAttack) return
-        SoundPlayer.play(attacker.getAttackSound())
+        if (!SoundPlayer.play(UncivSound(attacker.getName())))
+            SoundPlayer.play(attacker.getAttackSound())
+
         val (damageToDefender, damageToAttacker) = Battle.attackOrNuke(attacker, attackableTile)
 
         worldScreen.battleAnimationDeferred(attacker, damageToAttacker, defender, damageToDefender)
@@ -343,9 +355,7 @@ class BattleTable(val worldScreen: WorldScreen) : Table() {
 
         val attackButton = "NUKE".toTextButton().apply { color = Color.RED }
 
-        val canReach = attacker.unit.currentTile.getTilesInDistance(attacker.unit.getRange()).contains(targetTile)
-
-        if (!worldScreen.isPlayersTurn || !attacker.canAttack() || !canReach || !canNuke) {
+        if (!worldScreen.isPlayersTurn || !attacker.canAttack() || !canNuke) {
             attackButton.disable()
             attackButton.label.color = Color.GRAY
         }

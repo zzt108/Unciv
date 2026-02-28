@@ -8,58 +8,66 @@ import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.managers.ReligionState
 import com.unciv.models.ruleset.validation.ModCompatibility
 import com.unciv.models.stats.Stat
+import yairm210.purity.annotations.Readonly
 import kotlin.random.Random
 
 object Conditionals {
 
-    private fun getStateBasedRandom(state: StateForConditionals, unique: Unique?): Float {
+    @Readonly @Suppress("purity") // hashcode... requires a think
+    private fun getStateBasedRandom(state: GameContext, unique: Unique?): Float {
         var seed = state.gameInfo?.turns?.hashCode() ?: 0
         seed = seed * 31 + (unique?.hashCode() ?: 0)
         seed = seed * 31 + state.hashCode()
         return Random(seed).nextFloat()
     }
-    
+
+    @Readonly
     fun conditionalApplies(
         unique: Unique?,
         conditional: Unique,
-        state: StateForConditionals
+        state: GameContext
     ): Boolean {
 
-        if (conditional.type?.targetTypes?.any { it.modifierType == UniqueTarget.ModifierType.Other } == true)
+        if (conditional.isOtherModifierType)
             return true // not a filtering condition, includes e.g. ModifierHiddenFromUsers
 
         /** Helper to simplify conditional tests requiring gameInfo */
-        fun checkOnGameInfo(predicate: (GameInfo.() -> Boolean)): Boolean {
+        @Readonly
+        fun checkOnGameInfo(@Readonly predicate: (GameInfo.() -> Boolean)): Boolean {
             if (state.gameInfo == null) return false
             return state.gameInfo.predicate()
         }
 
         /** Helper to simplify conditional tests requiring a Civilization */
-        fun checkOnCiv(predicate: (Civilization.() -> Boolean)): Boolean {
+        @Readonly
+        fun checkOnCiv(@Readonly predicate: (Civilization.() -> Boolean)): Boolean {
             if (state.relevantCiv == null) return false
             return state.relevantCiv!!.predicate()
         }
 
         /** Helper to simplify conditional tests requiring a City */
-        fun checkOnCity(predicate: (City.() -> Boolean)): Boolean {
+        @Readonly
+        fun checkOnCity(@Readonly predicate: (City.() -> Boolean)): Boolean {
             if (state.relevantCity == null) return false
             return state.relevantCity!!.predicate()
         }
 
         /** Helper to simplify the "compare civ's current era with named era" conditions */
-        fun compareEra(eraParam: String, compare: (civEra: Int, paramEra: Int) -> Boolean): Boolean {
+        @Readonly
+        fun compareEra(eraParam: String, @Readonly compare: (civEra: Int, paramEra: Int) -> Boolean): Boolean {
             if (state.gameInfo == null) return false
             val era = state.gameInfo.ruleset.eras[eraParam] ?: return false
             return compare(state.relevantCiv!!.getEraNumber(), era.eraNumber)
         }
 
         /** Helper for ConditionalWhenAboveAmountStatResource and its below counterpart */
+        @Readonly
         fun checkResourceOrStatAmount(
             resourceOrStatName: String,
             lowerLimit: Float,
             upperLimit: Float,
             modifyByGameSpeed: Boolean = false,
-            compare: (current: Int, lowerLimit: Float, upperLimit: Float) -> Boolean
+            @Readonly compare: (current: Int, lowerLimit: Float, upperLimit: Float) -> Boolean
         ): Boolean {
             if (state.gameInfo == null) return false
             var gameSpeedModifier = if (modifyByGameSpeed) state.gameInfo.speed.modifier else 1f
@@ -74,11 +82,11 @@ object Conditionals {
             return compare(statReserve, lowerLimit * gameSpeedModifier, upperLimit * gameSpeedModifier)
         }
 
-
+        @Readonly
         fun compareCountables(
             first: String,
             second: String,
-            compare: (first: Int, second: Int) -> Boolean): Boolean {
+            @Readonly compare: (first: Int, second: Int) -> Boolean): Boolean {
 
             val firstNumber = Countables.getCountableAmount(first, state)
             val secondNumber = Countables.getCountableAmount(second, state)
@@ -89,8 +97,9 @@ object Conditionals {
                 false
         }
 
+        @Readonly
         fun compareCountables(first: String, second: String, third: String,
-                              compare: (first: Int, second: Int, third: Int) -> Boolean): Boolean {
+                              @Readonly compare: (first: Int, second: Int, third: Int) -> Boolean): Boolean {
 
             val firstNumber = Countables.getCountableAmount(first, state)
             val secondNumber = Countables.getCountableAmount(second, state)
@@ -127,10 +136,6 @@ object Conditionals {
                     { current, lowerLimit, upperLimit -> current >= lowerLimit && current <= upperLimit }
 
             UniqueType.ConditionalHappy -> checkOnCiv { stats.happiness >= 0 }
-            UniqueType.ConditionalBetweenHappiness ->
-                checkOnCiv { stats.happiness in conditional.params[0].toInt() .. conditional.params[1].toInt() }
-            UniqueType.ConditionalAboveHappiness -> checkOnCiv { stats.happiness > conditional.params[0].toInt() }
-            UniqueType.ConditionalBelowHappiness -> checkOnCiv { stats.happiness < conditional.params[0].toInt() }
             UniqueType.ConditionalGoldenAge -> checkOnCiv { goldenAges.isGoldenAge() }
             UniqueType.ConditionalNotGoldenAge -> checkOnCiv { !goldenAges.isGoldenAge() }
 
@@ -140,6 +145,20 @@ object Conditionals {
             UniqueType.ConditionalIfStartingInEra -> checkOnGameInfo { gameParameters.startingEra == conditional.params[0] }
             UniqueType.ConditionalSpeed -> checkOnGameInfo { gameParameters.speed == conditional.params[0] }
             UniqueType.ConditionalDifficulty -> checkOnGameInfo { gameParameters.difficulty == conditional.params[0] }
+            UniqueType.ConditionalDifficultyOrHigher -> checkOnGameInfo {
+                val difficulty = conditional.params[0]
+                if (difficulty in ruleset.difficulties) {
+                    val difficulties = ruleset.difficulties.keys.toList()
+                    difficulties.indexOf(getDifficulty().name) >= difficulties.indexOf(difficulty)
+                } else false
+            }
+            UniqueType.ConditionalDifficultyOrLower -> checkOnGameInfo {
+                val difficulty = conditional.params[0]
+                if (difficulty in ruleset.difficulties) {
+                    val difficulties = ruleset.difficulties.keys.toList()
+                    difficulties.indexOf(getDifficulty().name) <= difficulties.indexOf(difficulty)
+                } else false
+            }
             UniqueType.ConditionalVictoryEnabled -> checkOnGameInfo { gameParameters.victoryTypes.contains(conditional.params[0]) }
             UniqueType.ConditionalVictoryDisabled -> checkOnGameInfo { !gameParameters.victoryTypes.contains(conditional.params[0]) }
             UniqueType.ConditionalReligionEnabled -> checkOnGameInfo { isReligionEnabled() }
@@ -147,6 +166,7 @@ object Conditionals {
             UniqueType.ConditionalEspionageEnabled -> checkOnGameInfo { isEspionageEnabled() }
             UniqueType.ConditionalEspionageDisabled -> checkOnGameInfo { !isEspionageEnabled() }
             UniqueType.ConditionalNuclearWeaponsEnabled -> checkOnGameInfo { gameParameters.nuclearWeaponsEnabled }
+            UniqueType.ConditionalNuclearWeaponsDisabled -> checkOnGameInfo { !gameParameters.nuclearWeaponsEnabled }
             UniqueType.ConditionalTech -> checkOnCiv {
                 val filter = conditional.params[0]
                 if (filter in gameInfo.ruleset.technologies) tech.isResearched(conditional.params[0]) // fast common case
@@ -158,7 +178,13 @@ object Conditionals {
                 else tech.researchedTechnologies.none { it.matchesFilter(filter) }
             }
             UniqueType.ConditionalWhileResearching -> checkOnCiv { tech.currentTechnology()?.matchesFilter(conditional.params[0]) == true }
-
+            UniqueType.ConditionalNoCivAdopted -> checkOnGameInfo {
+                civilizations.none {
+                    it.isMajorCiv() &&
+                    it.isAlive() &&
+                    (it.policies.isAdopted(conditional.params[0]) || it.religionManager.religion?.hasBelief(conditional.params[0]) == true)
+                }
+            }
             UniqueType.ConditionalAfterPolicyOrBelief ->
                 checkOnCiv { policies.isAdopted(conditional.params[0]) || religionManager.religion?.hasBelief(conditional.params[0]) == true }
             UniqueType.ConditionalBeforePolicyOrBelief ->
@@ -190,6 +216,8 @@ object Conditionals {
                     && it.matchesFilter(conditional.params[2]) } >= conditional.params[1].toInt() }
             UniqueType.ConditionalBuildingBuiltByAnybody ->
                 checkOnGameInfo { getCities().any { it.cityConstructions.containsBuildingOrEquivalent(conditional.params[0]) } }
+            UniqueType.ConditionalBuildingNotBuiltByAnybody ->
+                !checkOnGameInfo { getCities().any { it.cityConstructions.containsBuildingOrEquivalent(conditional.params[0]) } }
 
             // Filtered via city.getMatchingUniques
             UniqueType.ConditionalInThisCity -> state.relevantCity != null
@@ -244,6 +272,10 @@ object Conditionals {
             UniqueType.ConditionalHasNotUsedOtherActions ->
                 state.unit == null || // So we get the action as a valid action in BaseUnit.hasUnique()
                     state.unit.abilityToTimesUsed.isEmpty()
+            UniqueType.ConditionalStackedWithUnit -> state.relevantUnit != null && 
+                    state.relevantUnit!!.getTile().getUnits().any { it != state.relevantUnit && it.matchesFilter(conditional.params[0]) }
+            UniqueType.ConditionalNotStackedWithUnit -> state.relevantUnit == null ||
+                    !state.relevantUnit!!.getTile().getUnits().any { it != state.relevantUnit && it.matchesFilter(conditional.params[0]) }
 
             UniqueType.ConditionalInTiles ->
                 state.relevantTile?.matchesFilter(conditional.params[0], state.relevantCiv) == true
@@ -255,7 +287,7 @@ object Conditionals {
                 state.attackedTile?.matchesFilter(conditional.params[0], state.relevantCiv) == true
             UniqueType.ConditionalNearTiles ->
                 state.relevantTile != null && state.relevantTile!!.getTilesInDistance(conditional.params[0].toInt()).any {
-                    it.matchesFilter(conditional.params[1])
+                    it.matchesFilter(conditional.params[1], state.relevantCiv)
                 }
 
             UniqueType.ConditionalVsLargerCiv -> {
@@ -331,7 +363,18 @@ object Conditionals {
                     first, second, third ->
                     first in second..third
                 }
-
+                
+            UniqueType.ConditionalWhenCarriedBy -> {
+                // Check if the unit is currently transported and being carried by matching filter
+                if (state.relevantUnit == null || !state.relevantUnit!!.isTransported) false
+                else {
+                    val carrier = state.relevantUnit!!.getTile().militaryUnit
+                    // Only true if: 1) carrier exists, 2) carrier is NOT the unit itself, 3) carrier matches filter
+                    carrier != null && carrier != state.relevantUnit && 
+                    carrier.matchesFilter(conditional.params[0]) == true
+                }
+            }
+            
             UniqueType.ConditionalModEnabled -> checkOnGameInfo {
                 val filter = conditional.params[0]
                 (gameParameters.mods.asSequence() + gameParameters.baseRuleset).any { ModCompatibility.modNameFilter(it, filter) }

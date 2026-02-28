@@ -14,7 +14,6 @@ import com.unciv.models.Counter
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.nation.Nation
 import com.unciv.models.ruleset.tile.ResourceType
-import com.unciv.models.ruleset.unique.StateForConditionals
 import com.unciv.models.stats.Stats
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.extensions.addSeparator
@@ -59,6 +58,7 @@ class MapEditorViewTab(
         nation.name = "Test"
         gameInfo = GameInfo()
         gameInfo.ruleset = ruleset
+        gameInfo.setGlobalTransients()
         cache.updateState()
         
         // show yields of strategic resources too
@@ -177,7 +177,7 @@ class MapEditorViewTab(
 
         val lines = ArrayList<FormattedLine>()
 
-        lines += FormattedLine("Position: [${tile.position.toString().replace(".0","")}]")
+        lines += FormattedLine("Position: [${tile.position.toPrettyString()}]")
         lines += FormattedLine()
 
         lines.addAll(TileDescription.toMarkup(tile, null))
@@ -222,7 +222,7 @@ class MapEditorViewTab(
             }
         }
 
-        if (tile.resource != null && (tile.resourceAmount > 0 || tile.tileResource.resourceType == ResourceType.Strategic)) {
+        if (tile.tileResource != null && (tile.resourceAmount > 0 || tile.tileResource?.resourceType == ResourceType.Strategic)) {
             renderedInfo.addSeparator(Color.GRAY)
             renderedInfo.add(Table().apply {
                 add("Resource abundance".toLabel(alignment = Align.left)).left().growX()

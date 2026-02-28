@@ -16,22 +16,30 @@ If you're developing your mod on an Android version of Unciv (not recommended!) 
 - Launch the desktop version with your mod (your mod's main folder is a subfolder of the game's "mods" folder, or symlinked there). This uses the packing methods [documented here](https://libgdx.com/wiki/tools/texture-packer).
 - You can ask someone in the Discord server to help you out.
 - You can use external tools, [e.g. gdx-texture-packer-gui](https://github.com/crashinvaders/gdx-texture-packer-gui). Utmost care needs to be taken that the files can be discovered by Unciv and internal relative paths are correct.
-- The Unciv repo itself has a feature that can pack images on github runners
+- You can add [a copy of this workflow](https://github.com/ravignir/RekMOD/blob/master/.github/workflows/autoupdate.yml) to your mod to automatically pack the atlas on every commit to your repository. It should be placed in the same place (`.github/workflows/autoupdate.yml`) as the example.
 
-### Multiple texture atlases
+### Rendering performance
+
+#### Multiple texture atlases
 
 If your mod has lots of images (or large ones), the textures might 'spill' into additional texture files - 2048x2048 is the limit for a single texture pack. You will see a `game2.png`, possibly a `game3.png` or more appear.
 This is not good for performance, which is why the base game controls which kinds of images go together into one texture(+atlas).
 This works for mods, too: Create not only one Images folder, but several, the additional ones named "Images.xyz", where xyz will become the filename of the additional texture file (So don't use both Images and Images.game - those will clash). Look at the Unciv base game to get a better idea how that works.
 To minimize texture swaps, try to group them by the situation where in the game they are needed. You can distibute by folder, but having the same subfolders under several "Images.xyz" and distributing the images between them will also work.
 
+For an example, you can see the [Alpha Frontier mod](https://github.com/carriontrooper/Alpha-Frontier).
+
 A file `Atlases.json` (uppercase 'A') in the mod root (not in `Images` or in `jsons`) controls which atlases to load, which in turn control which texture (`.png`) files are read.
 This file is automatically created by the built-in packer. Only the `game.atlas` file is read by default for backward compatibility.
 If you use external tools and multiple atlases, you will need to maintain this file yourself - it is a simple json array of strings, each a file name without the `.atlas` extension (saved as UTF-8 without byte order mark).
 
-### Rendering Performance
+#### Smaller icons
 
-Images that are packed together are much faster to render together. If most of the images in your mod are using images from the mod, we want to be able to wrap them from images *also* from your mod.
+A large number of atlases may be the result of having very large icons.
+We find that 100x100 pixels is good enough for most icons.
+
+#### Circle icons
+
 To allow for faster rendering for icons, which has a major performance effect, you can copy the ["OtherIcons/circle.png"](https://github.com/yairm210/Unciv/blob/master/android/Images.Icons/OtherIcons/Circle.png) to:
 
 - "ImprovementIcons/Circle.png" for improvements
@@ -39,6 +47,7 @@ To allow for faster rendering for icons, which has a major performance effect, y
 - "TechIcons/Circle.png" for technologies
 - "ConstructionIcons/Circle.png" for buildings and units
 - "StatIcons/Circle.png" for stats
+
 
 ### Texture packer settings
 
@@ -216,7 +225,7 @@ Civilopedia falls back to the icon for the Belief type - as you can see in the b
 
 You can enable pictures for each of the Victories, illustrating their progress. That could be a Spaceship under construction, showing the parts you've added, or cultural progress as you complete Policy branches. They will be shown on a new tab of the Victory Screen.
 
-For this, you need to create a number of images. In the following, `<>` denote names as they appear in [VictoryTypes.json](Mod-file-structure/5-Miscellaneous-JSON-files#victorytypesjson), untranslated, and these file names (like any other in Unciv) are case-sensitive. All files are optional, except Background as noted:
+For this, you need to create a number of images. In the following, `<>` denote names as they appear in [VictoryTypes.json](Mod-file-structure/5-Miscellaneous-JSON-files.md#victorytypesjson), untranslated, and these file names (like any other in Unciv) are case-sensitive. All files are optional, except Background as noted:
 
 * `VictoryIllustrations/<name>/Background.png` - this determines overall dimensions, the others must not exceed its size and should ideally have identical size. Mandatory, if this file is missing, no illustrations will be shown for this Victory Type.
 * `VictoryIllustrations/<name>/Won.png` - shown if _you_ (the viewing player) won this Victory.
@@ -237,7 +246,7 @@ There's no suggested size, but keep in mind textures are a maximum of 2048x2048 
 
 ## Sounds
 
-Standard values are below. The sounds themselves can be found [here](/sounds).
+Standard values are below. The sounds themselves can be found [here](https://github.com/yairm210/Unciv/tree/master/android/assets/sounds).
 
 -   _arrow, artillery, bombard, bombing, cannon, chimes, choir, click, coin, construction, elephant, fortify, gdrAttack, horse, jetgun, machinegun, metalhit, missile, nonmetalhit, nuke, paper, policy, promote, setup, shipguns, shot, slider, swap, tankshot, throw, torpedo, upgrade, whoosh_.
 
@@ -277,8 +286,8 @@ The current list of triggers is as follows:
 | Diplomacy: Select player                           | (nation name)     | [^M] | Peace or War[^3] |       | [^S]  |
 | First contact[^4]                                  | (civ name)        | [^M] |   Theme or Peace | [^X]  |       |
 | War declaration[^5]                                | (civ name)        | [^M] |              War | [^X]  |       |
-| Civ defeated                                       | (civ name)        |      |           Defeat | [^X]  |       |
-| Player wins                                        | (civ name)        |      |          Victory | [^X]  |       |
+| Civ defeated                                       | (victory/civ name) |     |           Defeat | [^X]  |       |
+| Player wins                                        | (victory/civ name) |     |          Victory | [^X]  |       |
 | Golden Age                                         | (civ name)        | [^M] |           Golden | [^X]  |       |
 | Wonder built                                       | (wonder name)     | [^M] |           Wonder | [^X]  |       |
 | Tech researched                                    | (tech name)       | [^M] |       Researched | [^X]  |       |
@@ -312,22 +321,13 @@ Also note that voices for City-State leaders work only for those messages a City
 ## Modding Easter eggs
 
 Here's a list of special dates (or date ranges) Unciv will recognize:
-|-----|
-| AprilFoolsDay |
-| DiaDeLosMuertos |
-| Diwali |
-| Easter |
-| Friday13th |
-| LunarNewYear |
-| Passover |
-| PrideDay |
-| Qingming |
-| Samhain |
-| StarWarsDay |
-| TowelDay |
-| UncivBirthday |
-| Xmas |
-| YuleGoat |
+
+| name            |              |             |               |
+|-----------------|--------------|-------------|---------------|
+| AprilFoolsDay   | Friday13th   | Qingming    | UncivBirthday |
+| DiaDeLosMuertos | LunarNewYear | Samhain     | Xmas          |
+| Diwali          | Passover     | StarWarsDay | YuleGoat      |
+| Easter          | PrideDay     | TowelDay    |               |
 
 ... When these are or what they mean - look it up, if in doubt in our sources (😈).
 

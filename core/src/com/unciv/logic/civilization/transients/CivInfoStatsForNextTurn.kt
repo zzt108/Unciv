@@ -8,13 +8,14 @@ import com.unciv.logic.map.tile.RoadStatus
 import com.unciv.models.ruleset.Policy
 import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.ruleset.tile.TileImprovement
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueTarget
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.stats.Stat
 import com.unciv.models.stats.StatMap
 import com.unciv.models.stats.Stats
 import com.unciv.ui.components.extensions.toPercent
+import yairm210.purity.annotations.Readonly
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -29,6 +30,7 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
     @Transient
     var statsForNextTurn = Stats()
 
+    @Readonly
     private fun getUnitMaintenance(): Int {
         val baseUnitCost = 0.5f
         var freeUnits = 3
@@ -49,7 +51,7 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
 
         // We IGNORE the conditionals when we get them civ-wide, so we won't need to do the same thing for EVERY unit in the civ.
         // This leads to massive memory and CPU time savings when calculating the maintenance!
-        val civwideDiscountUniques = civInfo.getMatchingUniques(UniqueType.UnitMaintenanceDiscount, StateForConditionals.IgnoreConditionals)
+        val civwideDiscountUniques = civInfo.getMatchingUniques(UniqueType.UnitMaintenanceDiscount, GameContext.IgnoreConditionals)
             .toList().asSequence()
 
         for (unit in unitsToPayFor) {
@@ -83,6 +85,7 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
         return cost.toInt()
     }
 
+    @Readonly
     private fun getTransportationUpkeep(): Stats {
         val transportationUpkeep = Stats()
         // we no longer use .flatMap, because there are a lot of tiles and keeping them all in a list
@@ -93,7 +96,7 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
                 .map { it.params[0] }.toHashSet() // needs to be .toHashSet()ed,
         // Because we go over every tile in every city and check if it's in this list, which can get real heavy.
 
-        fun addMaintenanceUniques(road: TileImprovement, type: UniqueType, state: StateForConditionals) {
+        fun addMaintenanceUniques(road: TileImprovement, type: UniqueType, state: GameContext) {
             for (unique in road.getMatchingUniques(type, state))
                 transportationUpkeep.add(Stat.valueOf(unique.params[1]), unique.params[0].toFloat())
         }
@@ -104,9 +107,9 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
                 if (tile.getUnpillagedRoad() == RoadStatus.None) continue // Cheap checks before pricey checks
                 if (ignoredTileTypes.any { tile.matchesFilter(it, civInfo) }) continue
                 val road = tile.getUnpillagedRoadImprovement()!!  // covered by RoadStatus.None test
-                val stateForConditionals = StateForConditionals(civInfo, tile = tile)
-                addMaintenanceUniques(road, UniqueType.ImprovementMaintenance, stateForConditionals)
-                addMaintenanceUniques(road, UniqueType.ImprovementAllMaintenance, stateForConditionals)
+                val gameContext = GameContext(civInfo, tile = tile)
+                addMaintenanceUniques(road, UniqueType.ImprovementMaintenance, gameContext)
+                addMaintenanceUniques(road, UniqueType.ImprovementAllMaintenance, gameContext)
             }
         }
 
@@ -115,8 +118,8 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
             val tile = civInfo.gameInfo.tileMap[position]
             if (tile.getUnpillagedRoad() == RoadStatus.None) continue // Cheap checks before pricey checks
             val road = tile.getUnpillagedRoadImprovement()!!  // covered by RoadStatus.None test
-            val stateForConditionals = StateForConditionals(civInfo, tile = tile)
-            addMaintenanceUniques(road, UniqueType.ImprovementAllMaintenance, stateForConditionals)
+            val gameContext = GameContext(civInfo, tile = tile)
+            addMaintenanceUniques(road, UniqueType.ImprovementAllMaintenance, gameContext)
         }
 
         for (unique in civInfo.getMatchingUniques(UniqueType.RoadMaintenance))
@@ -125,6 +128,7 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
         return transportationUpkeep
     }
 
+    @Readonly
     fun getUnitSupply(): Int {
         /* TotalSupply = BaseSupply + NumCities*modifier + Population*modifier
         * In civ5, it seems population modifier is always 0.5, so i hardcoded it down below */
@@ -135,15 +139,18 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
         return supply
     }
 
+    @Readonly
     fun getBaseUnitSupply(): Int {
         return civInfo.getDifficulty().unitSupplyBase +
             civInfo.getMatchingUniques(UniqueType.BaseUnitSupply).sumOf { it.params[0].toInt() }
     }
+    @Readonly
     fun getUnitSupplyFromCities(): Int {
         return civInfo.cities.size *
             (civInfo.getDifficulty().unitSupplyPerCity
                     + civInfo.getMatchingUniques(UniqueType.UnitSupplyPerCity).sumOf { it.params[0].toInt() })
     }
+    @Readonly
     fun getUnitSupplyFromPop(): Int {
         var totalSupply = civInfo.cities.sumOf { it.population.population } * civInfo.gameInfo.ruleset.modOptions.constants.unitSupplyPerPopulation
 
@@ -155,11 +162,12 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
         }
         return totalSupply.toInt()
     }
-    fun getUnitSupplyDeficit(): Int = max(0,civInfo.units.getCivUnitsSize() - getUnitSupply())
+    @Readonly fun getUnitSupplyDeficit(): Int = max(0,civInfo.units.getCivUnitsSize() - getUnitSupply())
 
     /** Per each supply missing, a player gets -10% production. Capped at -70%. */
-    fun getUnitSupplyProductionPenalty(): Float = -min(getUnitSupplyDeficit() * 10f, 70f)
+    @Readonly fun getUnitSupplyProductionPenalty(): Float = -min(getUnitSupplyDeficit() * 10f, 70f)
 
+    @Readonly
     fun getStatMapForNextTurn(): StatMap {
         val statMap = StatMap()
         for (city in civInfo.cities) {
@@ -170,15 +178,17 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
         //City-States bonuses
         for (otherCiv in civInfo.getKnownCivs()) {
             if (!otherCiv.isCityState) continue
-            if (otherCiv.getDiplomacyManager(civInfo.civName)!!.relationshipIgnoreAfraid() != RelationshipLevel.Ally)
+            if (otherCiv.getDiplomacyManager(civInfo)!!.relationshipIgnoreAfraid() != RelationshipLevel.Ally)
                 continue
             for (unique in civInfo.getMatchingUniques(UniqueType.CityStateStatPercent)) {
+                val stats = Stats()
+                stats.add(
+                    Stat.valueOf(unique.params[0]),
+                    otherCiv.stats.statsForNextTurn[Stat.valueOf(unique.params[0])] * unique.params[1].toFloat() / 100f
+                )
                 statMap.add(
                     Constants.cityStates,
-                    Stats().add(
-                        Stat.valueOf(unique.params[0]),
-                        otherCiv.stats.statsForNextTurn[Stat.valueOf(unique.params[0])] * unique.params[1].toFloat() / 100f
-                    )
+                    stats
                 )
             }
         }
@@ -243,7 +253,7 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
             civInfo.getMatchingUniques(UniqueType.CityStateLuxuryHappiness).sumOf { it.params[0].toInt() } / 100f
 
         val luxuriesProvidedByCityStates = civInfo.getKnownCivs().asSequence()
-            .filter { it.isCityState && it.getAllyCiv() == civInfo.civName }
+            .filter { it.isCityState && it.allyCiv == civInfo }
             .flatMap { it.getCivResourceSupply().map { res -> res.resource } }
             .distinct()
             .count { it.resourceType === ResourceType.Luxury && ownedLuxuries.contains(it) }
@@ -282,6 +292,7 @@ class CivInfoStatsForNextTurn(val civInfo: Civilization) {
         return statMap
     }
 
+    @Readonly
     private fun getGlobalStatsFromUniques():StatMap {
         val statMap = StatMap()
         if (civInfo.religionManager.religion != null) {

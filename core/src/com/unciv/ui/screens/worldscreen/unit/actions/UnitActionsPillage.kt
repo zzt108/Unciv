@@ -12,6 +12,7 @@ import com.unciv.models.stats.Stat
 import com.unciv.models.stats.Stats
 import com.unciv.ui.components.extensions.toPercent
 import com.unciv.ui.popups.ConfirmPopup
+import yairm210.purity.annotations.Readonly
 import kotlin.random.Random
 
 object UnitActionsPillage {
@@ -85,11 +86,12 @@ object UnitActionsPillage {
         // Accumulate the loot
         var pillageYield = Stats()
         val stateForConditionals = unit.cache.state
+        val random = Random(unit.civ.gameInfo.turns * unit.getTile().position.hashCode().toLong())
         for (unique in improvement.getMatchingUniques(UniqueType.PillageYieldRandom, stateForConditionals)) {
             for ((stat, value) in unique.stats) {
                 var yieldsToAdd = Stats()
                 // Unique text says "approximately [X]", so we add 0..X twice - think an RPG's 2d12
-                yieldsToAdd.add(stat, (Random.nextInt((value + 1).toInt()) + Random.nextInt((value + 1).toInt()).toFloat()))
+                yieldsToAdd.add(stat, (random.nextInt((value + 1).toInt()) + random.nextInt((value + 1).toInt()).toFloat()))
                 if (unique.isModifiedByGameSpeed())
                     yieldsToAdd *= unit.civ.gameInfo.speed.modifier
                 if (unique.isModifiedByGameProgress())
@@ -139,6 +141,7 @@ object UnitActionsPillage {
     }
 
     // Public - used in UnitAutomation
+    @Readonly
     fun canPillage(unit: MapUnit, tile: Tile): Boolean {
         if (unit.isTransported) return false
         if (!tile.canPillageTile()) return false

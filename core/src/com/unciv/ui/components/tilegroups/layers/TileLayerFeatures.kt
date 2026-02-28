@@ -25,23 +25,30 @@ class TileLayerFeatures(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup
     override fun hit(x: Float, y: Float, touchable: Boolean): Actor? = null
     override fun draw(batch: Batch?, parentAlpha: Float) = super.draw(batch, parentAlpha)
 
-    private fun updateRoadImages() {
+    private fun updateRoadImages(viewingCiv: Civilization?) {
 
         if (tileGroup.isForMapEditorIcon)
             return
 
         val tile = tileGroup.tile
+        val isTileVisible = viewingCiv == null || tile.isVisible(viewingCiv)
 
         for (neighbor in tile.neighbors) {
-            val roadImage = roadImages[neighbor] ?: RoadImage()
-                .also { roadImages[neighbor] = it }
+            var roadImage = roadImages[neighbor]
+            val currentStatus = roadImage?.roadStatus ?: RoadStatus.None
 
             val roadStatus = when {
+                !isTileVisible && viewingCiv != null && !neighbor.isVisible(viewingCiv) -> RoadStatus.None // don't show roads on non-visible tiles
                 tile.roadStatus == RoadStatus.None || neighbor.roadStatus === RoadStatus.None -> RoadStatus.None
                 tile.roadStatus == RoadStatus.Road || neighbor.roadStatus === RoadStatus.Road -> RoadStatus.Road
                 else -> RoadStatus.Railroad
             }
-            if (roadImage.roadStatus == roadStatus) continue // the image is correct
+            if (currentStatus == roadStatus) continue // the image is correct
+            
+            if (roadImage == null) { // create when missing
+                roadImage = RoadImage().also { roadImages[neighbor] = it }
+                roadImages[neighbor] = roadImage
+            }
 
             roadImage.roadStatus = roadStatus
 
@@ -73,7 +80,7 @@ class TileLayerFeatures(tileGroup: TileGroup, size: Float) : TileLayer(tileGroup
     }
 
     override fun doUpdate(viewingCiv: Civilization?, localUniqueCache: LocalUniqueCache) {
-        updateRoadImages()
+        updateRoadImages(viewingCiv)
     }
 
     fun dim() {

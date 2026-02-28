@@ -87,6 +87,7 @@ enum class KeyboardBinding(
     ToggleUI(Category.WorldScreen, "Toggle UI", KeyCharAndCode.ctrl('u')),
     ToggleWorkedTilesDisplay(Category.WorldScreen, KeyCharAndCode.UNKNOWN),
     ToggleMovementDisplay(Category.WorldScreen, KeyCharAndCode.UNKNOWN),
+    ToggleImprovementDisplay(Category.WorldScreen, KeyCharAndCode.UNKNOWN),
     ZoomIn(Category.WorldScreen, Input.Keys.NUMPAD_ADD),
     ZoomOut(Category.WorldScreen, Input.Keys.NUMPAD_SUBTRACT),
 
@@ -204,7 +205,9 @@ enum class KeyboardBinding(
     PediaPromotions(Category.Civilopedia, "Promotions", 'p'),
     PediaPolicies(Category.Civilopedia, "Policies", 'o'),
     PediaBeliefs(Category.Civilopedia, "Religions and Beliefs", 'f'),
+    PediaUnitNameGroups(Category.Civilopedia, "Unit Names", 'g'),
     PediaTutorials(Category.Civilopedia, "Tutorials", Input.Keys.F1),
+    PediaVictoryTypes(Category.Civilopedia, "Victory Types", 'v'),
     PediaDifficulties(Category.Civilopedia, "Difficulty levels", 'd'),
     PediaEras(Category.Civilopedia, "Eras", 'e'),
     PediaSpeeds(Category.Civilopedia, "Speeds", 's'),

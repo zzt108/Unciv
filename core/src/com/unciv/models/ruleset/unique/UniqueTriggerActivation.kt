@@ -1,29 +1,21 @@
 package com.unciv.models.ruleset.unique
 
-import com.badlogic.gdx.math.Vector2
 import com.unciv.Constants
 import com.unciv.UncivGame
 import com.unciv.logic.automation.civilization.NextTurnAutomation
 import com.unciv.logic.city.City
-import com.unciv.logic.civilization.AlertType
-import com.unciv.logic.civilization.CivFlags
-import com.unciv.logic.civilization.Civilization
-import com.unciv.logic.civilization.LocationAction
-import com.unciv.logic.civilization.MapUnitAction
-import com.unciv.logic.civilization.NotificationAction
-import com.unciv.logic.civilization.NotificationCategory
-import com.unciv.logic.civilization.NotificationIcon
-import com.unciv.logic.civilization.PolicyAction
-import com.unciv.logic.civilization.PopupAlert
-import com.unciv.logic.civilization.TechAction
+import com.unciv.logic.civilization.*
 import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
 import com.unciv.logic.civilization.diplomacy.DiplomaticModifiers
+import com.unciv.logic.civilization.managers.PolicyManager
 import com.unciv.logic.civilization.managers.ReligionState
+import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.mapgenerator.NaturalWonderGenerator
 import com.unciv.logic.map.mapgenerator.RiverGenerator
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
 import com.unciv.logic.map.tile.TileNormalizer
+import com.unciv.models.UncivSound
 import com.unciv.models.UpgradeUnitAction
 import com.unciv.models.ruleset.BeliefType
 import com.unciv.models.ruleset.Event
@@ -34,9 +26,11 @@ import com.unciv.models.stats.Stats
 import com.unciv.models.translations.fillPlaceholders
 import com.unciv.models.translations.hasPlaceholderParameters
 import com.unciv.models.translations.tr
+import com.unciv.ui.audio.SoundPlayer
 import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsUpgrade
 import com.unciv.utils.addToMapOfSets
 import com.unciv.utils.randomWeighted
+import yairm210.purity.annotations.Readonly
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
@@ -62,7 +56,8 @@ object UniqueTriggerActivation {
             notification = notification, triggerNotificationText = triggerNotificationText)
     }
 
-    /** @return whether an action was successfully performed */
+    /** @return whether an action was successfully performed
+     * Assumes that conditional check has already been performed */
     fun triggerUnique(
         unique: Unique,
         civInfo: Civilization,
@@ -93,36 +88,37 @@ object UniqueTriggerActivation {
         val relevantCity by lazy {
             city?: tile?.getCity()
         }
+        @Readonly fun getApplicableCities(cityFilter: String) =
+            if (cityFilter == "in this city") sequenceOf(relevantCity).filterNotNull()
+            else civInfo.cities.asSequence().filter { it.matchesFilter(cityFilter) }
 
         val timingConditional = unique.getModifiers(UniqueType.ConditionalTimedUnique).firstOrNull()
         if (timingConditional != null) {
             return {
                 civInfo.temporaryUniques.add(TemporaryUnique(unique, timingConditional.params[0].toInt()))
-                if (unique.type in setOf(UniqueType.ProvidesResources, UniqueType.ConsumesResources))
+                if (unique.type in setOf(UniqueType.ProvidesResources, UniqueType.ConsumesResources, UniqueType.StatPercentFromObjectToResource))
                     civInfo.cache.updateCivResources()
                 true
             }
         }
 
-        val stateForConditionals = StateForConditionals(civInfo, city, unit, tile)
-
-        if (!unique.conditionalsApply(stateForConditionals)) return null
+        val gameContext = GameContext(civInfo, city, unit, tile)
 
         val chosenCity = relevantCity ?:
             civInfo.cities.firstOrNull { it.isCapital() }
 
         val tileBasedRandom =
-            if (tile != null) Random(tile.position.toString().hashCode())
+            if (tile != null) Random(tile.position.hashCode())
             else Random(-550) // Very random indeed
         val ruleset = civInfo.gameInfo.ruleset
 
         when (unique.type) {
             UniqueType.TriggerEvent -> {
                 val event = ruleset.events[unique.params[0]] ?: return null
-                val choices = event.getMatchingChoices(stateForConditionals)
+                val choices = event.getMatchingChoices(gameContext)
                     ?: return null
                 if (civInfo.isAI() || event.presentation == Event.Presentation.None) return {
-                    val choice = choices.toList().randomWeighted { it.getWeightForAiDecision(stateForConditionals) }
+                    val choice = choices.toList().randomWeighted { it.getWeightForAiDecision(gameContext) }
                     choice.triggerChoice(civInfo, unit)
                 }
                 if (event.presentation == Event.Presentation.Alert) return {
@@ -139,6 +135,28 @@ object UniqueTriggerActivation {
             UniqueType.MarkTutorialComplete -> return {
                 UncivGame.Current.settings.addCompletedTutorialTask(unique.params[0])
                 true
+            }
+
+            UniqueType.PlaySound -> {
+                if (civInfo.isAIOrAutoPlaying()) return null
+                val soundName = unique.params[0]
+                if (soundName.isEmpty()) return null
+                val sound = UncivSound(soundName)
+                SoundPlayer.get(sound) ?: return null
+                return {
+                    SoundPlayer.play(sound)
+                    true
+                }
+            }
+
+            UniqueType.GetLeaderTitle -> {
+                if (!civInfo.isMajorCiv()) return null
+                return {
+                    civInfo.leaderTitle = unique.params[0]
+                    if (notification != null)
+                        civInfo.addNotification(notification, NotificationCategory.Diplomacy, NotificationIcon.Diplomacy)
+                    true
+                }
             }
 
             UniqueType.OneTimeFreeUnit -> {
@@ -236,6 +254,90 @@ object UniqueTriggerActivation {
                 }
                 return { placeUnits() }
             }
+            UniqueType.OneTimeRebel -> {
+                val barbarians = civInfo.gameInfo.getBarbarianCivilization()
+                val unitName = unique.params[0]
+                val baseUnit = ruleset.units[unitName] ?: return null
+                val civUnit = civInfo.getEquivalentUnit(baseUnit)
+                if (civUnit.isCityFounder() && civInfo.isOneCityChallenger())
+                    return null
+                fun placeUnit(): Boolean {
+                    val placedUnit = when {
+                        // Else set the unit at the given tile
+                        tile != null -> civInfo.gameInfo.tileMap.placeUnitNearTile(tile.position,baseUnit,barbarians) ?: return false
+                        // Else set unit unit near other units if we have no cities
+                        civInfo.units.getCivUnits().any() ->
+                            civInfo.gameInfo.tileMap.placeUnitNearTile(civInfo.units.getCivUnits().first().currentTile.position,baseUnit,barbarians) ?: return false
+
+                        else -> return false
+                    }
+                    val notificationText = getNotificationText(
+                        notification, triggerNotificationText,
+                        "[1] [${civUnit.name}] has rebelled against us!"
+                    )
+                    if (notificationText != null)
+                        civInfo.addNotification(
+                            notificationText,
+                            MapUnitAction(placedUnit),
+                            NotificationCategory.Units,
+                            placedUnit.name
+                        )
+                    return true
+                }
+                return { placeUnit() }
+            }
+
+            UniqueType.OneTimeAmountRebels -> {
+                val barbarians = civInfo.gameInfo.getBarbarianCivilization()
+                val unitName = unique.params[1]
+                val baseUnit = ruleset.units[unitName] ?: return null
+                val civUnit = civInfo.getEquivalentUnit(baseUnit)
+                if (civUnit.isCityFounder() && civInfo.isOneCityChallenger())
+                    return null
+                val limit = civUnit.getMatchingUniques(UniqueType.MaxNumberBuildable)
+                    .map { it.params[0].toInt() }.minOrNull()
+                val unitCount = civInfo.units.getCivUnits().count { it.name == civUnit.name }
+                val amountFromTriggerable = unique.params[0].toInt()
+                val actualAmount = when {
+                    limit == null -> amountFromTriggerable
+                    amountFromTriggerable + unitCount > limit -> limit - unitCount
+                    else -> amountFromTriggerable
+                }
+
+                if (actualAmount <= 0) return null
+
+                fun placeUnits(): Boolean {
+                    val placedUnits: MutableList<MapUnit> = mutableListOf()
+                    repeat(actualAmount) {
+                        val placedUnit = when {
+                            // Else set the unit at the given tile
+                            tile != null -> civInfo.gameInfo.tileMap.placeUnitNearTile(tile.position,baseUnit,barbarians) ?: return false
+                            // Else set unit unit near other units if we have no cities
+                            civInfo.units.getCivUnits().any() ->
+                                civInfo.gameInfo.tileMap.placeUnitNearTile(civInfo.units.getCivUnits().first().currentTile.position,baseUnit,barbarians) ?: return false
+
+                            else -> null
+                        }
+                        if (placedUnit != null) placedUnits += placedUnit
+                    }
+                    if (placedUnits.isEmpty()) return false
+
+                    val notificationText = getNotificationText(
+                        notification, triggerNotificationText,
+                        "[${placedUnits.size}] [${civUnit.name}] unit(s) have rebelled against us!"
+                    )
+
+                    if (notificationText != null)
+                        civInfo.addNotification(
+                            notificationText,
+                            MapUnitAction(placedUnits),
+                            NotificationCategory.Units,
+                            civUnit.name
+                        )
+                    return true
+                }
+                return { placeUnits() }
+            }
             UniqueType.OneTimeFreeUnitRuins -> {
                 val unitName = unique.params[0]
                 val baseUnit = ruleset.units[unitName] ?: return null
@@ -243,7 +345,7 @@ object UniqueTriggerActivation {
                 if (civUnit.isCityFounder() && civInfo.isOneCityChallenger()) {
                      val replacementUnit = ruleset.units.values
                          .firstOrNull {
-                             it.getMatchingUniques(UniqueType.BuildImprovements)
+                             it.getMatchingUniques(UniqueType.BuildImprovements, GameContext.IgnoreConditionals)
                                 .any { unique -> unique.params[0] == "Land" }
                          } ?: return null
                     civUnit = civInfo.getEquivalentUnit(replacementUnit.name)
@@ -305,28 +407,35 @@ object UniqueTriggerActivation {
                     true
                 }
             }
-            UniqueType.OneTimeAdoptPolicy -> {
-                val policyName = unique.params[0]
-                if (civInfo.policies.isAdopted(policyName)) return null
-                val policy = civInfo.gameInfo.ruleset.policies[policyName] ?: return null
-
-                return {
-                    civInfo.policies.freePolicies++
-                    civInfo.policies.adopt(policy)
-
-                    val notificationText = getNotificationText(
-                        notification, triggerNotificationText,
-                        "You gain the [$policyName] Policy"
-                    )
-                    if (notificationText != null)
-                        civInfo.addNotification(notificationText, PolicyAction(policyName), NotificationCategory.General, NotificationIcon.Culture)
-                    true
+            UniqueType.OneTimeAdoptPolicyOrBelief -> {
+                val name = unique.params[0]
+                val policy = civInfo.gameInfo.ruleset.policies[name]
+                val belief = civInfo.gameInfo.ruleset.beliefs[name]
+                when {
+                    policy != null && !civInfo.policies.isAdopted(name) -> return {
+                        civInfo.policies.freePolicies++
+                        civInfo.policies.adopt(policy)
+                        getNotificationText(notification, triggerNotificationText, "You gain the [$name] Policy")?.let {
+                            civInfo.addNotification(it, PolicyAction(name), NotificationCategory.General, NotificationIcon.Culture)
+                        }
+                        true
+                    }
+                    belief != null && civInfo.religionManager.religion?.hasBelief(name) == false -> return {
+                        civInfo.religionManager.religion?.addBelief(belief)
+                        getNotificationText(notification, triggerNotificationText, "You gain the [$name] Belief")?.let {
+                            civInfo.addNotification(it, NotificationCategory.Religion, NotificationIcon.Faith)
+                        }
+                        true
+                    }
+                    else -> return null
                 }
             }
+
             UniqueType.OneTimeRemovePolicy -> {
                 val policyFilter = unique.params[0]
-                val policiesToRemove = civInfo.policies.getAdoptedPoliciesMatching(policyFilter, stateForConditionals)
-                if (policiesToRemove.isEmpty()) return null
+                val policiesToRemove = civInfo.policies
+                    .getAdoptedPoliciesMatching(policyFilter, gameContext, forRemoval = true)
+                if (policiesToRemove.none()) return null
 
                 return {
                     for (policy in policiesToRemove) {
@@ -342,24 +451,28 @@ object UniqueTriggerActivation {
                     true
                 }
             }
-
             UniqueType.OneTimeRemovePolicyRefund -> {
                 val policyFilter = unique.params[0]
-                val refundPercentage = unique.params[1].toInt()
-                val policiesToRemove = civInfo.policies.getAdoptedPoliciesMatching(policyFilter, stateForConditionals)
-                if (policiesToRemove.isEmpty()) return null
+                val policiesToRemove = civInfo.policies
+                    .getAdoptedPoliciesMatching(policyFilter, gameContext, forRemoval = true)
+                if (policiesToRemove.none()) return null
 
+                val refundPercentage = unique.params[1].toInt()
                 val policiesToRemoveMap = civInfo.policies.getCultureRefundMap(policiesToRemove, refundPercentage)
 
                 return {
-                    for (policy in policiesToRemoveMap){
-                        civInfo.policies.removePolicy(policy.key)
-                        civInfo.policies.addCulture(policy.value)
-
-                        val notificationText = getNotificationText(
-                            notification, triggerNotificationText,
+                    for (policy in policiesToRemoveMap) {
+                        val effectNotificationText = if (policy.value == PolicyManager.FREE_POLICY_MARKER) {
+                            civInfo.policies.removePolicy(policy.key, assumeWasFree = true)
+                            civInfo.policies.freePolicies++
+                            "You lose the [${policy.key.name}] Policy. A free policy has been refunded"
+                        } else {
+                            civInfo.policies.removePolicy(policy.key)
+                            civInfo.policies.addCulture(policy.value)
                             "You lose the [${policy.key.name}] Policy. [${policy.value}] Culture has been refunded"
-                        )
+                        }
+                        val notificationText =
+                            getNotificationText(notification, triggerNotificationText, effectNotificationText)
                         if (notificationText != null)
                             civInfo.addNotification(notificationText, PolicyAction(policy.key.name), NotificationCategory.General, NotificationIcon.Culture)
                     }
@@ -398,9 +511,7 @@ object UniqueTriggerActivation {
             }
 
             UniqueType.OneTimeGainPopulation -> {
-                val applicableCities =
-                    if (unique.params[1] == "in this city") sequenceOf(relevantCity).filterNotNull()
-                    else civInfo.cities.asSequence().filter { it.matchesFilter(unique.params[1]) }
+                val applicableCities = getApplicableCities(unique.params[1])
                 if (applicableCities.none()) return null
                 return {
                     for (applicableCity in applicableCities) {
@@ -409,7 +520,7 @@ object UniqueTriggerActivation {
                     if (notification != null)
                         civInfo.addNotification(
                             notification,
-                            LocationAction(applicableCities.map { it.location }),
+                            LocationAction(applicableCities.map { it.location.toHexCoord() }),
                             NotificationCategory.Cities,
                             NotificationIcon.Population
                         )
@@ -428,7 +539,7 @@ object UniqueTriggerActivation {
                             else notification
                         civInfo.addNotification(
                             notificationText,
-                            LocationAction(randomCity.location, tile?.position),
+                            LocationAction(randomCity.location.toHexCoord(), tile?.position),
                             NotificationCategory.Cities,
                             NotificationIcon.Population
                         )
@@ -458,8 +569,8 @@ object UniqueTriggerActivation {
             UniqueType.OneTimeFreeTechRuins -> {
                 val researchableTechsFromThatEra = ruleset.technologies.values
                     .filter {
-                        (it.column!!.era == unique.params[1] || unique.params[1] == "any era")
-                                && civInfo.tech.canBeResearched(it.name)
+                        (it.era(ruleset)?.matchesFilter(unique.params[1], gameContext) == true) &&
+                        civInfo.tech.canBeResearched(it.name)
                     }
                 if (researchableTechsFromThatEra.isEmpty()) return null
 
@@ -503,19 +614,6 @@ object UniqueTriggerActivation {
                 }
             }
 
-            UniqueType.StrategicResourcesIncrease -> {
-                return {
-                    civInfo.cache.updateCivResources()
-                    if (notification != null)
-                        civInfo.addNotification(
-                            notification,
-                            NotificationCategory.General,
-                            NotificationIcon.Construction
-                        )
-                    true
-                }
-            }
-
             UniqueType.OneTimeProvideResources -> {
                 val resourceName = unique.params[1]
                 val resource = ruleset.tileResources[resourceName] ?: return null
@@ -531,7 +629,7 @@ object UniqueTriggerActivation {
                         "You have gained [$amount] [$resourceName]"
                     )
                     if (notificationText != null)
-                        civInfo.addNotification(notificationText, NotificationCategory.General, NotificationIcon.Science, "ResourceIcons/$resourceName")
+                        civInfo.addNotification(notificationText, NotificationCategory.General, resourceName)
                     true
                 }
             }
@@ -551,28 +649,68 @@ object UniqueTriggerActivation {
                         "You have lost [$amount] [$resourceName]"
                     )
                     if (notificationText != null)
-                        civInfo.addNotification(notificationText, NotificationCategory.General, NotificationIcon.Science, "ResourceIcons/$resourceName")
+                        civInfo.addNotification(notificationText, NotificationCategory.General, resourceName)
                     true
                 }
             }
 
             UniqueType.OneTimeGainResource -> {
                 val resourceName = unique.params[1]
-                
                 val resource = ruleset.getGameResource(resourceName) ?: return null
                 if (resource is TileResource && !resource.isStockpiled) return null
 
                 return {
                     var amount = unique.params[0].toInt()
                     if (unique.isModifiedByGameSpeed()) {
-                        if (resource is Stat) amount = (amount * civInfo.gameInfo.speed.statCostModifiers[resource]!!).roundToInt()
-                        else amount = (amount * civInfo.gameInfo.speed.modifier).roundToInt()
+                        amount = if (resource is Stat) (amount * civInfo.gameInfo.speed.statCostModifiers[resource]!!).roundToInt()
+                        else (amount * civInfo.gameInfo.speed.modifier).roundToInt()
                     }
                     city?.addGameResource(resource, amount) ?: civInfo.addGameResource(resource, amount)
+
+                    val notificationText = getNotificationText(
+                        notification, triggerNotificationText,
+                        "You have gained [$amount] [$resourceName]"
+                    )
+                    if (notificationText != null)
+                        civInfo.addNotification(notificationText, NotificationCategory.General, resourceName)
                     true
                 }
             }
 
+            UniqueType.OneTimeSetStockpile -> {
+                val resourceName = unique.params[0]
+                val resource = ruleset.getGameResource(resourceName) ?: return null
+                if (resource is TileResource && !resource.isStockpiled) return null
+
+                val gameContext = GameContext(civInfo, city)
+                val countableResult = Countables.getCountableAmount(unique.params[1], gameContext) ?: return null
+
+                return {
+                    var amountRequired = countableResult
+                    if (unique.isModifiedByGameSpeed()) {
+                        amountRequired = if (resource is Stat) (amountRequired * civInfo.gameInfo.speed.statCostModifiers[resource]!!).roundToInt()
+                        else (amountRequired * civInfo.gameInfo.speed.modifier).roundToInt()
+                    }
+                    if (city != null){
+                        val currentAmount = city.getGameResource(resource)
+                        val missingAmount = amountRequired - currentAmount
+                        city.addGameResource(resource, missingAmount)
+                    }
+                    else {
+                        val currentAmount = civInfo.getGameResource(resource)
+                        val missingAmount = amountRequired - currentAmount
+                        civInfo.addGameResource(resource, missingAmount)
+                    }
+
+                    val notificationText = getNotificationText(
+                        notification, triggerNotificationText,
+                        "[$resourceName] has been set to [$amountRequired]"
+                    )
+                    if (notificationText != null)
+                        civInfo.addNotification(notificationText, NotificationCategory.General, resourceName)
+                    true
+                }
+            }
             UniqueType.UnitsGainPromotion -> {
                 val filter = unique.params[0]
                 val promotionName = unique.params[1]
@@ -597,7 +735,7 @@ object UniqueTriggerActivation {
                             notification,
                             MapUnitAction(promotedUnits),
                             NotificationCategory.Units,
-                            "unitPromotionIcons/$promotionName"
+                            promotionName
                         )
                     }
                     true
@@ -767,10 +905,22 @@ object UniqueTriggerActivation {
                     return null // no more available beliefs of this type
 
                 return {
-                    if (beliefType == BeliefType.Any && religionManager.religionState <= ReligionState.Pantheon)
+                    var religionIcon = beliefType.name
+                    if (beliefType == BeliefType.Any && religionManager.religionState <= ReligionState.Pantheon) {
                         religionManager.freeBeliefs.add(BeliefType.Pantheon.name, 1) // add pantheon instead of any type
+                        religionIcon = BeliefType.Pantheon.name
+                    }
                     else
                         religionManager.freeBeliefs.add(beliefType.name, 1)
+
+                    if (notification != null) {
+                        civInfo.addNotification(
+                            notification,
+                            NotificationCategory.Religion,
+                            NotificationIcon.Faith,
+                            "ReligionIcons/${religionIcon}"
+                        )
+                    }
                     true
                 }
             }
@@ -794,7 +944,7 @@ object UniqueTriggerActivation {
                 val radius = unique.params[2].toInt()
 
                 val isAll = amount in Constants.all
-                val positions = ArrayList<Vector2>()
+                val positions = ArrayList<HexCoord>()
 
                 var explorableTiles = tile.getTilesInDistance(radius)
                     .filter { !it.isExplored(civInfo) && it.matchesFilter(filter) }
@@ -815,7 +965,7 @@ object UniqueTriggerActivation {
                     if (notification != null) {
                         civInfo.addNotification(
                             notification,
-                            LocationAction(positions),
+                            LocationAction(positions.asSequence()),
                             NotificationCategory.War,
                             if (unique.params[1] == Constants.barbarianEncampment)
                                 NotificationIcon.Barbarians else NotificationIcon.Scout
@@ -883,7 +1033,7 @@ object UniqueTriggerActivation {
                             // We don't tell which civilization entered the new era, as that is done in the notification directly above this one
                                 spy.addNotification("We have recruited [${spy.name}] as a spy!")
                             else
-                                spy.addNotification("After an unknown civilization entered the [$currentEra], we have recruited [${spy.name}] as a spy!")
+                                spy.addNotification("After [an unknown civilization] entered the [$currentEra], we have recruited [${spy.name}] as a spy!")
                         }
                     }
                     true
@@ -911,11 +1061,28 @@ object UniqueTriggerActivation {
                 }
             }
 
+            UniqueType.OneTimeTakeOverTilesInCity -> {
+                val applicableCities = getApplicableCities(unique.params[1])
+                if (applicableCities.none()) return null
+                if (applicableCities.none { it.expansion.chooseNewTileToOwn() != null }) return null
+
+                return {
+                    val positiveAmount = unique.params[0].toInt()
+                    for (applicableCity in applicableCities) {
+                        for (i in 1..positiveAmount) {
+                            val tileToOwn = applicableCity.expansion.chooseNewTileToOwn() ?: break
+                            applicableCity.expansion.takeOwnership(tileToOwn)
+                        }
+                    }
+                    if (notification != null)
+                        civInfo.addNotification(notification, LocationAction(applicableCities.map { it.location.toHexCoord() }), NotificationCategory.Cities, NotificationIcon.City)
+                    true
+                }
+            }
+
             UniqueType.GainFreeBuildings -> {
                 val freeBuilding = civInfo.getEquivalentBuilding(unique.params[0])
-                val applicableCities =
-                    if (unique.params[1] == "in this city") sequenceOf(relevantCity!!)
-                    else civInfo.cities.asSequence().filter { it.matchesFilter(unique.params[1]) }
+                val applicableCities = getApplicableCities(unique.params[1])
                 if (applicableCities.none()) return null
 
                 return {
@@ -944,26 +1111,29 @@ object UniqueTriggerActivation {
             }
 
             UniqueType.RemoveBuilding -> {
-                val applicableCities =
-                    if (unique.params[1] == "in this city") sequenceOf(relevantCity!!)
-                    else civInfo.cities.asSequence().filter { it.matchesFilter(unique.params[1]) }
+                val applicableCities = getApplicableCities(unique.params[1])
                 if (applicableCities.none()) return null
 
                 return {
                     for (applicableCity in applicableCities) {
                         val buildingsToRemove = applicableCity.cityConstructions.getBuiltBuildings().filter {
                             it.matchesFilter(unique.params[0], applicableCity.state)
-                        }.toSet()
-                        applicableCity.cityConstructions.removeBuildings(buildingsToRemove)
+                        }
+                        for (building in buildingsToRemove) applicableCity.cityConstructions.removeBuilding(building)
                     }
+                    if (notification != null)
+                        civInfo.addNotification(
+                            notification,
+                            LocationAction(applicableCities.map { it.location.toHexCoord() }),
+                            NotificationCategory.Cities,
+                            NotificationIcon.Construction
+                        )
                     true
                 }
             }
 
             UniqueType.OneTimeSellBuilding -> {
-                val applicableCities =
-                    if (unique.params[1] == "in this city") sequenceOf(relevantCity!!)
-                    else civInfo.cities.asSequence().filter { it.matchesFilter(unique.params[1]) }
+                val applicableCities = getApplicableCities(unique.params[1])
                 if (applicableCities.none()) return null
 
                 return {
@@ -974,6 +1144,13 @@ object UniqueTriggerActivation {
 
                         for (building in buildingsToSell) applicableCity.sellBuilding(building)
                     }
+                    if (notification != null)
+                        civInfo.addNotification(
+                            notification,
+                            LocationAction(applicableCities.map { it.location.toHexCoord() }),
+                            NotificationCategory.Cities,
+                            NotificationIcon.Gold
+                        )
                     true
                 }
             }
@@ -984,7 +1161,7 @@ object UniqueTriggerActivation {
                 return {
                     unit.healBy(unique.params[1].toInt())
                     if (notification != null)
-                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units) // Do we have a heal icon?
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name, "Heal Instantly")
                     true
                 }
             }
@@ -993,7 +1170,7 @@ object UniqueTriggerActivation {
                 return {
                     unit.takeDamage(unique.params[1].toInt())
                     if (notification != null)
-                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units) // Do we have a heal icon?
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name)
                     true
                 }
             }
@@ -1002,7 +1179,7 @@ object UniqueTriggerActivation {
                 return {
                     unit.promotions.XP += unique.params[1].toInt()
                     if (notification != null)
-                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units)
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name, "UnitActionIcons/Promote")
                     true
                 }
             }
@@ -1014,6 +1191,8 @@ object UniqueTriggerActivation {
                             unique.params[1].toFloat()
                         else -unique.params[1].toFloat()
                     unit.useMovementPoints(movementToUse)
+                    if (notification != null)
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name)
                     true
                 }
             }
@@ -1022,6 +1201,8 @@ object UniqueTriggerActivation {
                 if (unique.params[1] !in unit.civ.gameInfo.ruleset.unitPromotions) return null
                 return {
                     unit.setStatus(unique.params[1], unique.params[2].toInt())
+                    if (notification != null)
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name, unique.params[1])
                     true
                 }
             }
@@ -1030,12 +1211,16 @@ object UniqueTriggerActivation {
                 if (!unit.hasStatus(unique.params[1])) return null
                 return {
                     unit.removeStatus(unique.params[1])
+                    if (notification != null)
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name, unique.params[1])
                     true
                 }
             }
             UniqueType.OneTimeUnitDestroyed -> {
                 if (unit == null) return null
                 return {
+                    if (notification != null)
+                        unit.civ.addNotification(notification, LocationAction(unit.getTile().position), NotificationCategory.Units, unit.name, "OtherIcons/DisbandUnit")
                     unit.destroy()
                     true
                 }
@@ -1048,10 +1233,9 @@ object UniqueTriggerActivation {
                     else UnitActionsUpgrade.getFreeUpgradeAction(unit)
                 if (upgradeAction.none()) return null
                 return {
-                    
                     (upgradeAction.minBy { (it as UpgradeUnitAction).unitToUpgradeTo.cost }).action!!()
                     if (notification != null)
-                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units)
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name, "UnitActionIcons/Upgrade")
                     true
                 }
             }
@@ -1063,7 +1247,7 @@ object UniqueTriggerActivation {
                 return {
                     unit.promotions.addPromotion(promotion, true)
                     if (notification != null)
-                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name)
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name, promotion)
                     true
                 }
             }
@@ -1074,6 +1258,39 @@ object UniqueTriggerActivation {
                     ?: return null
                 return {
                     unit.promotions.removePromotion(promotion)
+                    if (notification != null)
+                        unit.civ.addNotification(notification, MapUnitAction(unit), NotificationCategory.Units, unit.name, promotion)
+                    true
+                }
+            }
+
+            UniqueType.OneTimeRemoveResourcesFromTile -> {
+                if (tile == null) return null
+                val resource = tile.tileResource ?: return null
+                val resourceFilter = unique.params[0]
+                if (!resource.matchesFilter(resourceFilter)) return null
+                return {
+                    tile.tileResource = null
+                    tile.resourceAmount = 0
+                    true
+                }
+            }
+
+            UniqueType.OneTimeRemoveImprovementsFromTile -> {
+                if (tile == null) return null
+                val tileImprovement = tile.getTileImprovement() ?: return null
+                val improvementFilter = unique.params[0]
+                if (!tileImprovement.matchesFilter(improvementFilter)) return null
+                return {
+                    // Don't remove the improvement if we're just removing the roads
+                    if (improvementFilter != "All Road") {
+                        tile.removeImprovement()
+                    }
+
+                    // Remove the roads if desired
+                    if (improvementFilter == "All" || improvementFilter == "All Road") {
+                        tile.removeRoad()
+                    }
                     true
                 }
             }
@@ -1083,11 +1300,11 @@ object UniqueTriggerActivation {
                 val terrain = ruleset.terrains[unique.params[0]] ?: return null
                 if (terrain.name == Constants.river)
                     return getOneTimeChangeRiverTriggerFunction(tile)
+                if (terrain.type.isBaseTerrain && tile.baseTerrain == terrain.name) return null
+                if (tile.isCityCenter() && terrain.type != TerrainType.Land) return null
+                if (tile.terrainFeatures.contains(terrain.name)) return null
                 if (terrain.type == TerrainType.TerrainFeature && !terrain.occursOn.contains(tile.lastTerrain.name))
                     return null
-                if (tile.terrainFeatures.contains(terrain.name)) return null
-                if (tile.isCityCenter() && terrain.type != TerrainType.Land) return null
-                if (terrain.type.isBaseTerrain && tile.baseTerrain == terrain.name) return null
 
                 return {
                     when (terrain.type) {
@@ -1115,7 +1332,7 @@ object UniqueTriggerActivation {
                 if (tilesToTakeOver.none()) return null
 
                 /** Lower is better */
-                fun cityPriority(city: City) = city.getCenterTile().aerialDistanceTo(tile) + (if (city.isBeingRazed) 5 else 0)
+                @Readonly fun cityPriority(city: City) = city.getCenterTile().aerialDistanceTo(tile) + (if (city.isBeingRazed) 5 else 0)
 
                 val citiesWithAdjacentTiles = tilesToTakeOver.asSequence()
                     .flatMap { it.neighbors + it }
@@ -1136,16 +1353,14 @@ object UniqueTriggerActivation {
                             otherCiv.getDiplomacyManagerOrMeet(civInfo).addModifier(DiplomaticModifiers.StealingTerritory, -10f)
                             civsToNotify.add(otherCiv)
                         }
-                        // check if civ has steal a tile from a citystate 
+                        // check if civ has stolen a tile from a citystate
                         if (otherCiv != null && otherCiv.isCityState) {
                             // create this varibale diplomacyCityState for more readability
                             val diplomacyCityState = otherCiv.getDiplomacyManagerOrMeet(civInfo)
                             diplomacyCityState.addInfluence(-15f)
 
-                            
-
                             if (!diplomacyCityState.hasFlag(DiplomacyFlags.TilesStolen)) {
-                                civInfo.popupAlerts.add(PopupAlert(AlertType.TilesStolen, otherCiv.civName))
+                                civInfo.popupAlerts.add(PopupAlert(AlertType.TilesStolen, otherCiv.civID))
                                 diplomacyCityState.setFlag(DiplomacyFlags.TilesStolen, 1)
                             }
                         }
@@ -1160,10 +1375,58 @@ object UniqueTriggerActivation {
                 }
             }
 
+            UniqueType.OneTimeUnitGetsName -> {
+                if (unit == null) return null
+                val unitNameGroup = unique.params[1]
+                // Get both the name and associated unique for the unit name
+                val pair = ruleset.unitNameGroups.values.filter {
+                        // Get all unit name groups that match the name or a tag
+                        it.name == unitNameGroup || it.hasTagUnique(unitNameGroup, unit.cache.state)
+                    }
+                    .filter {
+                        // Validate that it's available
+                        it.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals)
+                            .none { unique -> !unique.conditionalsApply(unit.cache.state) } &&
+                        it.getMatchingUniques(UniqueType.Unavailable, GameContext.IgnoreConditionals)
+                            .none { unique -> unique.conditionalsApply(unit.cache.state) }
+                    }
+                    .flatMap { group -> 
+                        // Grab only names that haven't been taken
+                        group.unitNames.filter {
+                            name -> name !in civInfo.gameInfo.unitNamesTaken
+                        }
+                        // Make a pair of the name and the group instance
+                        .map { it to group }
+                    }
+                    .shuffled().firstOrNull()
+                if (pair == null) return null
+
+                return {
+                    unit.instanceName = pair.first
+                    civInfo.gameInfo.unitNamesTaken.add(pair.first)
+                    unit.promotions.addPromotion(pair.first, true)
+                    for (groupUnique in pair.second.uniqueObjects) {
+                        if (groupUnique.isTriggerable && !groupUnique.hasTriggerConditional() && groupUnique.conditionalsApply(unit.cache.state)) {
+                            triggerUnique(groupUnique, unit)
+                        }
+                    }
+                    true
+                }
+            }
+
+            UniqueType.OneTimeGlobalAlert -> {
+                if (triggerNotificationText == null) return null
+                val alertText = unique.params[0]
+                return {
+                    UniqueTriggerExecutors.triggerGlobalAlerts(civInfo, alertText, triggerNotificationText)
+                }
+            }
+
             else -> return null
         }
     }
 
+    @Readonly
     private fun getNotificationText(notification: String?, triggerNotificationText: String?, effectNotificationText: String): String? {
         return if (!notification.isNullOrEmpty()) notification
         else if (triggerNotificationText != null)

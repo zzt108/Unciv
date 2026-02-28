@@ -6,10 +6,11 @@ import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.UncivSound
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.UnitType
 import com.unciv.ui.components.extensions.toPercent
+import yairm210.purity.annotations.Readonly
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -17,12 +18,11 @@ class CityCombatant(val city: City) : ICombatant {
     override fun getMaxHealth(): Int {
         return city.getMaxHealth()
     }
-
     override fun getHealth(): Int = city.health
-    override fun getCivInfo(): Civilization = city.civ
+    @Readonly override fun getCivInfo(): Civilization = city.civ
     override fun getTile(): Tile = city.getCenterTile()
     override fun getName(): String = city.name
-    override fun isDefeated(): Boolean = city.health == 1
+    @Readonly override fun isDefeated(): Boolean = city.health == 1
     override fun isInvisible(to: Civilization): Boolean = false
     override fun canAttack(): Boolean = city.canBombard()
     override fun matchesFilter(filter: String, multiFilter: Boolean) = 
@@ -36,14 +36,14 @@ class CityCombatant(val city: City) : ICombatant {
     }
 
     override fun getUnitType(): UnitType = UnitType.City
-    override fun getAttackingStrength(): Int = (getCityStrength(CombatAction.Attack) * 0.75).roundToInt()
-    override fun getDefendingStrength(attackedByRanged: Boolean): Int {
+    override fun getAttackingStrength(defender: ICombatant?): Int = (getCityStrength(defender, CombatAction.Attack) * 0.75).roundToInt()
+    @Readonly override fun getDefendingStrength(attacker: ICombatant?): Int {
         if (isDefeated()) return 1
-        return getCityStrength()
+        return getCityStrength(attacker)
     }
 
-    @Suppress("MemberVisibilityCanBePrivate")
-    fun getCityStrength(combatAction: CombatAction = CombatAction.Defend): Int { // Civ fanatics forum, from a modder who went through the original code
+    @Readonly
+    fun getCityStrength(theirCombatant: ICombatant? = null, combatAction: CombatAction = CombatAction.Defend): Int { // Civ fanatics forum, from a modder who went through the original code
         val modConstants = getCivInfo().gameInfo.ruleset.modOptions.constants
         var strength = modConstants.cityStrengthBase
         strength += (city.population.population * modConstants.cityStrengthPerPop) // Each 5 pop gives 2 defence
@@ -64,11 +64,14 @@ class CityCombatant(val city: City) : ICombatant {
             strength += cityTile.militaryUnit!!.baseUnit.strength * (cityTile.militaryUnit!!.health / 100f) * modConstants.cityStrengthFromGarrison
 
         var buildingsStrength = city.getStrength()
-        val stateForConditionals = StateForConditionals(getCivInfo(), city, ourCombatant = this, combatAction = combatAction)
+        val gameContext = GameContext(getCivInfo(), city, ourCombatant = this, theirCombatant = theirCombatant, combatAction = combatAction)
 
-        for (unique in getCivInfo().getMatchingUniques(UniqueType.BetterDefensiveBuildings, stateForConditionals))
+        for (unique in getCivInfo().getMatchingUniques(UniqueType.BetterDefensiveBuildings, gameContext))
             buildingsStrength *= unique.params[0].toPercent()
         strength += buildingsStrength
+
+        val extraStrength = city.getMatchingUniques(UniqueType.StrengthAmount, gameContext).sumOf { it.params[0].toInt() }
+        strength += extraStrength
 
         return strength.roundToInt()
     }

@@ -5,8 +5,12 @@ import com.unciv.UncivGame
 import com.unciv.json.json
 import com.unciv.logic.GameInfo
 import com.unciv.logic.GameInfoPreview
+import com.unciv.logic.UncivKtor
 import com.unciv.logic.files.UncivFiles
 import com.unciv.logic.multiplayer.ServerFeatureSet
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
 
 /**
  * Allows access to games stored on a server for multiplayer purposes.
@@ -23,8 +27,16 @@ class MultiplayerServer(
     val fileStorageIdentifier: String? = null,
     private var authenticationHeader: Map<String, String>? = null
 ) {
-    internal var featureSet = ServerFeatureSet()
-    fun getServerUrl() = fileStorageIdentifier ?: UncivGame.Current.settings.multiplayer.server
+    private var featureSet = ServerFeatureSet()
+    fun getFeatureSet() = featureSet
+    fun setFeatureSet(value: ServerFeatureSet) {
+        if (featureSet != value) {
+            UncivGame.Current.worldScreen?.chatButton?.refreshVisibility()
+            featureSet = value
+        }
+    }
+
+    fun getServerUrl() = fileStorageIdentifier ?: UncivGame.Current.settings.multiplayer.getServer()
 
     fun fileStorage(): FileStorage {
         val authHeader = if (authenticationHeader == null) {
@@ -43,20 +55,36 @@ class MultiplayerServer(
      * Checks if the server is alive and sets the [serverFeatureSet] accordingly.
      * @return true if the server is alive, false otherwise
      */
-    fun checkServerStatus(): Boolean {
-        var statusOk = false
-        SimpleHttp.sendGetRequest("${getServerUrl()}/isalive") { success, result, _ ->
-            statusOk = success
-            if (result.isNotEmpty()) {
-                featureSet = try {
-                    json().fromJson(ServerFeatureSet::class.java, result)
+    suspend fun checkServerStatus(): Boolean {
+        val server = getServerUrl()
+        val isAliveSuffix = "/isalive"
+        val resp = UncivKtor.client.get("$server$isAliveSuffix")
+
+        if (resp.status.isSuccess()) {
+            setFeatureSet(
+                try {
+                    json().fromJson(ServerFeatureSet::class.java, resp.bodyAsText())
                 } catch (_: Exception) {
                     // The server does not support server feature set - not an error!
                     ServerFeatureSet()
                 }
+            )
+
+            /**
+             * The following block is an one time optimization that
+             * ensures that we are not following redirects every time
+             */
+            val multiplayer = UncivGame.Current.settings.multiplayer
+            if (server == multiplayer.getServer()) {
+                multiplayer.setServer(
+                    resp.request.url.toString().removeSuffix(isAliveSuffix)
+                )
             }
+
+            return true
         }
-        return statusOk
+
+        return false
     }
 
 
@@ -71,11 +99,10 @@ class MultiplayerServer(
         val settings = UncivGame.Current.settings.multiplayer
 
         val success = fileStorage().authenticate(
-            userId=settings.userId,
-            password=password ?: settings.passwords[settings.server] ?: ""
+            userId = settings.getUserId(), password = password ?: settings.getCurrentServerPassword() ?: ""
         )
         if (password != null && success) {
-            settings.passwords[settings.server] = password
+            settings.setCurrentServerPassword(password)
         }
         return success
     }
@@ -87,8 +114,7 @@ class MultiplayerServer(
      */
     fun setPassword(password: String): Boolean {
         if (featureSet.authVersion > 0 && fileStorage().setPassword(newPassword = password)) {
-            val settings = UncivGame.Current.settings.multiplayer
-            settings.passwords[settings.server] = password
+            UncivGame.Current.settings.multiplayer.setCurrentServerPassword(password)
             return true
         }
 
@@ -100,7 +126,7 @@ class MultiplayerServer(
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time
      * @throws MultiplayerAuthException if the authentication failed
      */
-    suspend fun tryUploadGame(gameInfo: GameInfo, withPreview: Boolean) {
+    suspend fun uploadGame(gameInfo: GameInfo, withPreview: Boolean) {
         val zippedGameInfo = UncivFiles.gameInfoToString(gameInfo, forceZip = true, updateChecksum = true)
         fileStorage().saveFileData(gameInfo.gameId, zippedGameInfo)
 
@@ -123,7 +149,7 @@ class MultiplayerServer(
      * @throws FileStorageRateLimitReached if the file storage backend can't handle any additional actions for a time
      * @throws MultiplayerAuthException if the authentication failed
      *
-     * @see tryUploadGame
+     * @see uploadGame
      * @see GameInfo.asPreview
      */
     suspend fun tryUploadGamePreview(gameInfo: GameInfoPreview) {
@@ -138,7 +164,7 @@ class MultiplayerServer(
     suspend fun tryDownloadGame(gameId: String): GameInfo {
         val zippedGameInfo = fileStorage().loadFileData(gameId)
         val gameInfo = UncivFiles.gameInfoFromString(zippedGameInfo)
-        gameInfo.gameParameters.multiplayerServerUrl = UncivGame.Current.settings.multiplayer.server
+        gameInfo.gameParameters.multiplayerServerUrl = UncivGame.Current.settings.multiplayer.getServer()
         return gameInfo
     }
 

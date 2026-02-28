@@ -1,10 +1,11 @@
-
-import com.unciv.build.BuildConfig.coroutinesVersion
-import com.unciv.build.BuildConfig.gdxVersion
-import com.unciv.build.BuildConfig.kotlinVersion
-import com.unciv.build.BuildConfig.ktorVersion
 import com.unciv.build.BuildConfig.appVersion
+import java.util.Properties
 
+val kotlinVersion: String by project
+val gdxVersion: String by project
+val coroutinesVersion: String by project
+val ktorVersion: String by project
+val jnaVersion: String by project
 
 buildscript {
     repositories {
@@ -18,29 +19,73 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${com.unciv.build.BuildConfig.kotlinVersion}")
-        classpath("com.android.tools.build:gradle:8.9.2")
+        val kotlinVersion: String by project
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
+        classpath("com.android.tools.build:gradle:8.9.3")
     }
 }
 
 // Fixes the error "Please initialize at least one Kotlin target in 'Unciv (:)'"
 kotlin {
     jvm()
+    java {
+        // required for building Unciv with a Java version higher than 24 (e.g. Java 25)
+        sourceCompatibility = JavaVersion.VERSION_21
+    }
 }
+
 
 // Plugins used for serialization of JSON for networking
 plugins {
-    id("io.gitlab.arturbosch.detekt").version("1.23.0-RC3")
-    // For some weird reason, the *docker build* fails to recognize linking to the shared kotlinVersion in plugins
-    // This is *with* gradle 8.2 downloaded according the project specs, no idea what that's about
-    kotlin("multiplatform") version "1.9.24"
-    kotlin("plugin.serialization") version "1.9.24"
+    val kotlinVersion: String by project
+    kotlin("multiplatform") version kotlinVersion
+    kotlin("plugin.serialization") version kotlinVersion
+    id("io.gitlab.arturbosch.detekt") version "1.23.8"
+    id("io.github.yairm210.purity-plugin") version "1.3.3" apply false
 }
 
 allprojects {
+//    repositories{ // for local purity
+//        mavenLocal()
+//    }
+
+    apply(plugin = "io.github.yairm210.purity-plugin")
+    configure<yairm210.purity.PurityConfiguration> {
+        wellKnownPureFunctions = setOf(
+        )
+        wellKnownReadonlyFunctions = setOf(
+            "com.badlogic.gdx.math.Vector2.len",
+            "com.badlogic.gdx.math.Vector2.cpy",
+            "com.badlogic.gdx.math.Vector2.hashCode",
+
+            "com.badlogic.gdx.graphics.Color.cpy",
+            "com.badlogic.gdx.graphics.Color.toString",
+
+            "com.badlogic.gdx.files.FileHandle.child",
+            "com.badlogic.gdx.files.FileHandle.list",
+            "com.badlogic.gdx.files.FileHandle.exists",
+            "com.badlogic.gdx.files.FileHandle.isDirectory",
+            "com.badlogic.gdx.files.FileHandle.isFile",
+            "com.badlogic.gdx.files.FileHandle.name",
+
+            "java.util.stream.StreamSupport.longStream",
+            "java.util.stream.LongStream.parallel",
+            "kotlin.sequences.shuffled",
+            "kotlin.LongArray.get",
+            "kotlin.LongArray.iterator",
+            "kotlin.collections.copyInto",
+        )
+        wellKnownPureClasses = setOf(
+        )
+        wellKnownInternalStateClasses = setOf(
+            "com.badlogic.gdx.math.Vector2",
+        )
+        warnOnPossibleAnnotations = false
+    }
+
     apply(plugin = "eclipse")
     apply(plugin = "idea")
-    
+
     version = appVersion
 
     repositories {
@@ -72,26 +117,46 @@ project(":desktop") {
         "implementation"("com.github.MinnDevelopment:java-discord-rpc:v2.0.1")
 
         // Needed for Windows turn notifiers
-        "implementation"("net.java.dev.jna:jna:5.11.0")
-        "implementation"("net.java.dev.jna:jna-platform:5.11.0")
+        "implementation"("net.java.dev.jna:jna:$jnaVersion")
+        "implementation"("net.java.dev.jna:jna-platform:$jnaVersion")
     }
 }
 
 // For server-side
 project(":server") {
     apply(plugin = "kotlin")
+    apply(plugin = "org.jetbrains.kotlin.plugin.serialization")
 
     dependencies {
         // For server-side
-        "implementation"("io.ktor:ktor-server-core:1.6.8")
-        "implementation"("io.ktor:ktor-server-netty:1.6.8")
-        "implementation"("ch.qos.logback:logback-classic:1.2.5")
-        "implementation"("com.github.ajalt.clikt:clikt:3.4.0")
-    }
+        "implementation"("io.ktor:ktor-server-core:$ktorVersion")
+        "implementation"("io.ktor:ktor-server-netty:$ktorVersion")
+        "implementation"("io.ktor:ktor-server-auth:$ktorVersion")
+        "implementation"("io.ktor:ktor-server-content-negotiation:$ktorVersion")
+        "implementation"("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
+        "implementation"("io.ktor:ktor-server-websockets:$ktorVersion")
+        "implementation"("ch.qos.logback:logback-classic:1.5.18")
+        "implementation"("com.github.ajalt.clikt:clikt:4.4.0")
 
+        // clikt somehow needs this
+        "implementation"("net.java.dev.jna:jna:$jnaVersion")
+        "implementation"("net.java.dev.jna:jna-platform:$jnaVersion")
+    }
 }
 
-if (System.getenv("ANDROID_HOME") != null) {
+private fun getSdkPath(): String? {
+    val localProperties = project.file("local.properties")
+    return if (localProperties.exists()) {
+        val properties = Properties()
+        localProperties.inputStream().use { properties.load(it) }
+
+        properties.getProperty("sdk.dir") ?: System.getenv("ANDROID_HOME")
+    } else {
+        System.getenv("ANDROID_HOME")
+    }
+}
+
+if (getSdkPath() != null) {
     project(":android") {
         apply(plugin = "com.android.application")
         apply(plugin = "kotlin-android")
@@ -123,6 +188,8 @@ project(":core") {
         "implementation"("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
         "implementation"("org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
 
+        "implementation"("io.github.yairm210:purity-annotations:1.3.4")
+
         "implementation"("io.ktor:ktor-client-core:$ktorVersion")
         "implementation"("io.ktor:ktor-client-cio:$ktorVersion")
         "implementation"("io.ktor:ktor-client-websockets:$ktorVersion")
@@ -143,6 +210,7 @@ project(":core") {
             "implementation"(project(":core"))
 
             "implementation"("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
+            "implementation"("org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
 
             "implementation"("junit:junit:4.13.2")
             "implementation"("org.mockito:mockito-core:5.13.0")

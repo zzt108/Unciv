@@ -25,7 +25,7 @@ object DeclareWar {
      */
     internal fun declareWar(diplomacyManager: DiplomacyManager, declareWarReason: DeclareWarReason) {
         val civInfo = diplomacyManager.civInfo
-        val otherCiv = diplomacyManager.otherCiv()
+        val otherCiv = diplomacyManager.otherCiv
         val otherCivDiplomacy = diplomacyManager.otherCivDiplomacy()
 
         if (otherCiv.isCityState && declareWarReason.warType == WarType.DirectWar)
@@ -40,14 +40,31 @@ object DeclareWar {
 
         breakTreaties(diplomacyManager)
 
-        if (otherCiv.isMajorCiv())
-            for (unique in civInfo.getTriggeredUniques(UniqueType.TriggerUponDeclaringWar))
-                UniqueTriggerActivation.triggerUnique(unique, civInfo)
+        triggerUniques(otherCiv, civInfo)
+    }
+
+    private fun triggerUniques(otherCiv: Civilization, warDeclarerCiv: Civilization) {
+
+        for (unique in warDeclarerCiv.getTriggeredUniques(UniqueType.TriggerUponDeclaringWarFiltered)
+                { otherCiv.matchesFilter(it.params[0])} )
+            UniqueTriggerActivation.triggerUnique(unique, warDeclarerCiv)
+
+        for (unique in otherCiv.getTriggeredUniques(UniqueType.TriggerUponBeingDeclaredWarUpon)
+                { warDeclarerCiv.matchesFilter(it.params[0])} ) 
+            UniqueTriggerActivation.triggerUnique(unique, otherCiv)
+
+        for (unique in warDeclarerCiv.getTriggeredUniques(UniqueType.TriggerUponEnteringWar)
+                {otherCiv.matchesFilter(it.params[0])})
+            UniqueTriggerActivation.triggerUnique(unique, warDeclarerCiv)
+
+        for (unique in otherCiv.getTriggeredUniques(UniqueType.TriggerUponEnteringWar)
+                {warDeclarerCiv.matchesFilter(it.params[0])})
+            UniqueTriggerActivation.triggerUnique(unique, otherCiv)
     }
 
     private fun handleCityStateDirectAttack(diplomacyManager: DiplomacyManager) {
         val civInfo = diplomacyManager.civInfo
-        val otherCiv = diplomacyManager.otherCiv()
+        val otherCiv = diplomacyManager.otherCiv
         val otherCivDiplomacy = diplomacyManager.otherCivDiplomacy()
 
         otherCivDiplomacy.setInfluence(-60f)
@@ -55,7 +72,7 @@ object DeclareWar {
         otherCiv.cityStateFunctions.cityStateAttacked(civInfo)
 
         // You attacked your own ally, you're a right bastard
-        if (otherCiv.getAllyCiv() == civInfo.civName) {
+        if (otherCiv.allyCiv == civInfo) {
             otherCiv.cityStateFunctions.updateAllyCivForCityState()
             otherCivDiplomacy.setInfluence(-120f)
             for (knownCiv in civInfo.getKnownCivs()) {
@@ -66,7 +83,7 @@ object DeclareWar {
 
     private fun notifyOfWar(diplomacyManager: DiplomacyManager, declareWarReason: DeclareWarReason) {
         val civInfo = diplomacyManager.civInfo
-        val otherCiv = diplomacyManager.otherCiv()
+        val otherCiv = diplomacyManager.otherCiv
 
         when (declareWarReason.warType) {
             WarType.DirectWar -> {
@@ -106,8 +123,8 @@ object DeclareWar {
                 // We only want to send these notifications once, it doesn't matter who sends it though
                 if (civInfo.gameInfo.civilizations.indexOf(civInfo) > civInfo.gameInfo.civilizations.indexOf(allyCiv)) return
 
-                otherCiv.popupAlerts.add(PopupAlert(AlertType.WarDeclaration, civInfo.civName))
-                otherCiv.popupAlerts.add(PopupAlert(AlertType.WarDeclaration, allyCiv.civName))
+                otherCiv.popupAlerts.add(PopupAlert(AlertType.WarDeclaration, civInfo.civID))
+                otherCiv.popupAlerts.add(PopupAlert(AlertType.WarDeclaration, allyCiv.civID))
 
                 civInfo.addNotification("You and [${allyCiv.civName}] have declared war against [${otherCiv.civName}]!",
                         NotificationCategory.Diplomacy, otherCiv.civName, NotificationIcon.War, allyCiv.civName, civInfo.civName)
@@ -131,16 +148,16 @@ object DeclareWar {
         // Cancel all trades.
         for (trade in diplomacyManager.trades)
             for (offer in trade.theirOffers.filter { it.duration > 0 && it.name != Constants.defensivePact})
-                diplomacyManager.civInfo.addNotification("[${offer.name}] from [${diplomacyManager.otherCivName}] has ended",
-                    DiplomacyAction(diplomacyManager.otherCivName, true),
-                    NotificationCategory.Trade, diplomacyManager.otherCivName, NotificationIcon.Trade)
+                diplomacyManager.civInfo.addNotification("[${offer.name}] from [${diplomacyManager.otherCiv.civName}] has ended",
+                    DiplomacyAction(diplomacyManager.otherCiv, true),
+                    NotificationCategory.Trade, diplomacyManager.otherCiv.civName, NotificationIcon.Trade)
         diplomacyManager.trades.clear()
-        diplomacyManager.civInfo.tradeRequests.removeAll { it.requestingCiv == diplomacyManager.otherCivName }
+        diplomacyManager.civInfo.tradeRequests.removeAll { it.requestingCiv == diplomacyManager.otherCiv.civID }
 
         // Must come *before* state is "at war" so units know they're not allowed in tiles without open borders anymore
         diplomacyManager.updateHasOpenBorders()
 
-        val civAtWarWith = diplomacyManager.otherCiv()
+        val civAtWarWith = diplomacyManager.otherCiv
 
         // If we attacked, then we need to end all of our defensive pacts acording to Civ 5
         if (isOffensiveWar) {
@@ -164,11 +181,14 @@ object DeclareWar {
         diplomacyManager.setFlag(DiplomacyFlags.DeclinedPeace, diplomacyManager.civInfo.gameInfo.ruleset.modOptions.constants.minimumWarDuration) // AI won't propose peace for 10 turns
         diplomacyManager.setFlag(DiplomacyFlags.DeclaredWar, diplomacyManager.civInfo.gameInfo.ruleset.modOptions.constants.minimumWarDuration) // AI won't agree to trade for 10 turns
         diplomacyManager.removeFlag(DiplomacyFlags.BorderConflict)
+
+        // War results in removal of embassies for both sides
+        diplomacyManager.civInfo.diplomacyFunctions.removeEmbassies(civAtWarWith)
     }
 
     private fun changeOpinions(diplomacyManager: DiplomacyManager, declareWarReason: DeclareWarReason) {
         val civInfo = diplomacyManager.civInfo
-        val otherCiv = diplomacyManager.otherCiv()
+        val otherCiv = diplomacyManager.otherCiv
         val otherCivDiplomacy = diplomacyManager.otherCivDiplomacy()
         val warType = declareWarReason.warType
 
@@ -203,7 +223,7 @@ object DeclareWar {
     }
 
     private fun breakTreaties(diplomacyManager: DiplomacyManager) {
-        val otherCiv = diplomacyManager.otherCiv()
+        val otherCiv = diplomacyManager.otherCiv
         val otherCivDiplomacy = diplomacyManager.otherCivDiplomacy()
 
         var betrayedFriendship = false
@@ -257,7 +277,7 @@ object DeclareWar {
      * This is so that we can apply more negative modifiers later.
      */
     private fun removeDefensivePacts(diplomacyManager: DiplomacyManager) {
-        val civAtWarWith = diplomacyManager.otherCiv()
+        val civAtWarWith = diplomacyManager.otherCiv
         for (thirdPartyDiploManager in diplomacyManager.civInfo.diplomacy.values) {
             if (thirdPartyDiploManager.diplomaticStatus != DiplomaticStatus.DefensivePact) continue
 
@@ -267,7 +287,7 @@ object DeclareWar {
 
             // We already removed the trades and functionality
             // But we don't want to remove the flags yet so we can process BetrayedDefensivePact later
-            if (thirdPartyDiploManager.otherCiv() != civAtWarWith) {
+            if (thirdPartyDiploManager.otherCiv != civAtWarWith) {
                 // Trades with defensive pact are now invalid
                 val defensivePactOffer = thirdPartyDiploManager.trades
                     .firstOrNull { trade -> trade.ourOffers.any { offer -> offer.name == Constants.defensivePact } }
@@ -280,15 +300,15 @@ object DeclareWar {
                 thirdPartyDiploManager.otherCivDiplomacy().removeFlag(DiplomacyFlags.DefensivePact)
             }
             for (civ in thirdPartyDiploManager.getCommonKnownCivsWithSpectators()) {
-                civ.addNotification("[${diplomacyManager.civInfo.civName}] cancelled their Defensive Pact with [${thirdPartyDiploManager.otherCivName}]!",
-                    NotificationCategory.Diplomacy, diplomacyManager.civInfo.civName, NotificationIcon.Diplomacy, thirdPartyDiploManager.otherCivName)
+                civ.addNotification("[${diplomacyManager.civInfo.civName}] cancelled their Defensive Pact with [${thirdPartyDiploManager.otherCiv.civName}]!",
+                    NotificationCategory.Diplomacy, diplomacyManager.civInfo.civName, NotificationIcon.Diplomacy, thirdPartyDiploManager.otherCiv.civName)
             }
 
-            thirdPartyDiploManager.otherCiv().addNotification("[${diplomacyManager.civInfo.civName}] cancelled their Defensive Pact with us!",
-                NotificationCategory.Diplomacy, diplomacyManager.civInfo.civName, NotificationIcon.Diplomacy, thirdPartyDiploManager.otherCivName)
+            thirdPartyDiploManager.otherCiv.addNotification("[${diplomacyManager.civInfo.civName}] cancelled their Defensive Pact with us!",
+                NotificationCategory.Diplomacy, diplomacyManager.civInfo.civName, NotificationIcon.Diplomacy, thirdPartyDiploManager.otherCiv.civName)
 
-            thirdPartyDiploManager.civInfo.addNotification("We have cancelled our Defensive Pact with [${thirdPartyDiploManager.otherCivName}]!",
-                NotificationCategory.Diplomacy, NotificationIcon.Diplomacy, thirdPartyDiploManager.otherCivName)
+            thirdPartyDiploManager.civInfo.addNotification("We have cancelled our Defensive Pact with [${thirdPartyDiploManager.otherCiv.civName}]!",
+                NotificationCategory.Diplomacy, NotificationIcon.Diplomacy, thirdPartyDiploManager.otherCiv.civName)
         }
     }
 
@@ -298,13 +318,13 @@ object DeclareWar {
      * The civ that we are calling them in against should no longer have a defensive pact with us.
      */
     private fun callInDefensivePactAllies(diplomacyManager: DiplomacyManager) {
-        val civAtWarWith = diplomacyManager.otherCiv()
+        val civAtWarWith = diplomacyManager.otherCiv
         for (ourDefensivePact in diplomacyManager.civInfo.diplomacy.values.filter { ourDipManager ->
             ourDipManager.diplomaticStatus == DiplomaticStatus.DefensivePact
-                && !ourDipManager.otherCiv().isDefeated()
-                && !ourDipManager.otherCiv().isAtWarWith(civAtWarWith)
-        }) {
-            val ally = ourDefensivePact.otherCiv()
+                && !ourDipManager.otherCiv.isDefeated()
+                && !ourDipManager.otherCiv.isAtWarWith(civAtWarWith)
+        }.toList()) {
+            val ally = ourDefensivePact.otherCiv
             if (!civAtWarWith.knows(ally)) civAtWarWith.diplomacyFunctions.makeCivilizationsMeet(ally, true)
             // Have the aggressor declare war on the ally.
             civAtWarWith.getDiplomacyManager(ally)!!.declareWar(DeclareWarReason(WarType.DefensivePactWar, diplomacyManager.civInfo))
@@ -312,16 +332,15 @@ object DeclareWar {
     }
 
     private fun callInCityStateAllies(diplomacyManager: DiplomacyManager) {
-        val civAtWarWith = diplomacyManager.otherCiv()
+        val civAtWarWith = diplomacyManager.otherCiv
         for (thirdCiv in diplomacyManager.civInfo.getKnownCivs()
-            .filter { it.isCityState && it.getAllyCiv() == diplomacyManager.civInfo.civName }) {
+            .filter { it.isCityState && it.allyCiv == diplomacyManager.civInfo }.toList()) {
 
-            if (!thirdCiv.isAtWarWith(civAtWarWith)) {
-                if (!thirdCiv.knows(civAtWarWith))
-                    // Our city state ally has not met them yet, so they have to meet first
-                    thirdCiv.diplomacyFunctions.makeCivilizationsMeet(civAtWarWith, warOnContact = true)
-                thirdCiv.getDiplomacyManager(civAtWarWith)!!.declareWar(DeclareWarReason(WarType.CityStateAllianceWar, diplomacyManager.civInfo))
-            }
+            if (thirdCiv.isAtWarWith(civAtWarWith)) continue
+            if (!thirdCiv.knows(civAtWarWith))
+                // Our city state ally has not met them yet, so they have to meet first
+                thirdCiv.diplomacyFunctions.makeCivilizationsMeet(civAtWarWith, warOnContact = true)
+            thirdCiv.getDiplomacyManager(civAtWarWith)!!.declareWar(DeclareWarReason(WarType.CityStateAllianceWar, diplomacyManager.civInfo))
         }
     }
 }

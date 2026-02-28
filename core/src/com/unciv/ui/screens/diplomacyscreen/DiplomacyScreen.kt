@@ -5,9 +5,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.SplitPane
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton
 import com.badlogic.gdx.utils.Align
+import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.UncivGame
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
 import com.unciv.logic.civilization.diplomacy.DiplomacyManager
 import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
 import com.unciv.logic.civilization.diplomacy.RelationshipLevel
@@ -26,7 +28,7 @@ import com.unciv.ui.components.input.KeyCharAndCode
 import com.unciv.ui.components.input.keyShortcuts
 import com.unciv.ui.components.input.onActivation
 import com.unciv.ui.components.input.onClick
-import com.unciv.ui.components.tilegroups.InfluenceTable
+import com.unciv.ui.components.tilegroups.citybutton.InfluenceTable
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.ConfirmPopup
 import com.unciv.ui.screens.basescreen.BaseScreen
@@ -139,7 +141,8 @@ class DiplomacyScreen(
 
             val civIndicator = ImageGetter.getNationPortrait(civ.nation, nationIconSize)
 
-            val relationLevel = civ.getDiplomacyManager(viewingCiv)!!.relationshipLevel()
+            val diplomacy = civ.getDiplomacyManager(viewingCiv)!!
+            val relationLevel = diplomacy.relationshipLevel()
             val relationshipIcon = if (civ.isCityState && relationLevel == RelationshipLevel.Ally)
                 ImageGetter.getImage("OtherIcons/Star")
                     .surroundWithCircle(size = 30f, color = relationLevel.color).apply {
@@ -147,7 +150,10 @@ class DiplomacyScreen(
                     }
             else
                 ImageGetter.getCircle(
-                    color = if (viewingCiv.isAtWarWith(civ)) Color.RED else relationLevel.color,
+                    color = if (civ.isHuman() && viewingCiv.isHuman()) getHumanRelationshipColor(diplomacy)
+                    else if (diplomacy.diplomaticStatus == DiplomaticStatus.DefensivePact) Color.PURPLE
+                    else if (civ.isAtWarWith(viewingCiv)) Color.RED
+                    else relationLevel.color,
                     size = 30f
                 )
             civIndicator.addActor(relationshipIcon)
@@ -219,6 +225,54 @@ class DiplomacyScreen(
         return tradeTable
     }
 
+    /**
+     * Helper function for updateLeftSideTable() and getHumanRelationshipTable() (human-human relationships only)
+     * @param otherCivDiplomacyManager Other human player [DiplomacyManager]
+     * @return Relationship color between two human players
+     */
+    private fun getHumanRelationshipColor(otherCivDiplomacyManager: DiplomacyManager): Color {
+        // should ensure colors align with equivalent human-AI relationship colors (RelationshipLevel ?)
+        // as of writing, RelationshipLevel colors are not appropriate IMO, so using hardcoded values for now
+        return if (otherCivDiplomacyManager.diplomaticStatus == DiplomaticStatus.DefensivePact)
+            Color.CYAN
+        else if (otherCivDiplomacyManager.hasFlag(DiplomacyFlags.DeclarationOfFriendship))
+            Color.GREEN
+        else if (otherCivDiplomacyManager.diplomaticStatus == DiplomaticStatus.War)
+            Color.RED
+        else
+            RelationshipLevel.Neutral.color
+    }
+
+    /**
+     * Human-human relationships only. See also: getHumanRelationshipColor()
+     * @param otherCivDiplomacyManager Other human player [DiplomacyManager]
+     * @return Relationship text (e.g. "Friend")
+     */
+    private fun getHumanRelationshipText(otherCivDiplomacyManager: DiplomacyManager): String {
+        return if (otherCivDiplomacyManager.diplomaticStatus == DiplomaticStatus.DefensivePact)
+            Constants.defensivePact
+        else if (otherCivDiplomacyManager.hasFlag(DiplomacyFlags.DeclarationOfFriendship))
+            RelationshipLevel.Friend.name
+        else if (otherCivDiplomacyManager.diplomaticStatus == DiplomaticStatus.War)
+            RelationshipLevel.Enemy.name
+        else
+            RelationshipLevel.Neutral.name
+    }
+
+    /**
+     * @param otherCivDiplomacyManager Other human player [DiplomacyManager]
+     * @return Relationship [Table] for human vs human player only
+     */
+    internal fun getHumanRelationshipTable(otherCivDiplomacyManager: DiplomacyManager): Table {
+        val relationshipTable = Table()
+        val relationshipColor: Color = getHumanRelationshipColor(otherCivDiplomacyManager)
+        val relationshipText: String = getHumanRelationshipText(otherCivDiplomacyManager)
+
+        relationshipTable.add("{Our relationship}: ".toLabel())
+        relationshipTable.add(relationshipText.toLabel(relationshipColor)).row()
+        return relationshipTable
+    }
+
     internal fun getRelationshipTable(otherCivDiplomacyManager: DiplomacyManager): Table {
         val relationshipTable = Table()
 
@@ -278,26 +332,26 @@ class DiplomacyScreen(
         messageLines += "Declare war on [${otherCiv.civName}]?"
         // Tell the player who all will join the other side from defensive pacts
         val otherCivDefensivePactList = otherCiv.diplomacy.values.filter {
-            otherCivDiploManager -> otherCivDiploManager.otherCiv() != viewingCiv
+            otherCivDiploManager -> otherCivDiploManager.otherCiv != viewingCiv
             && otherCivDiploManager.diplomaticStatus == DiplomaticStatus.DefensivePact
-            && !otherCivDiploManager.otherCiv().isAtWarWith(viewingCiv) }
-            .map { it.otherCiv() }
+            && !otherCivDiploManager.otherCiv.isAtWarWith(viewingCiv) }
+            .map { it.otherCiv }
 
         // Defensive pact chains are not allowed now
         for (civ in otherCivDefensivePactList) {
             messageLines += if (viewingCiv.knows(civ)) {
                 "[${civ.civName}] will also join them in the war"
             } else {
-                "An unknown civilization will also join them in the war"
+                "[An unknown civilization] will also join them in the war"
             }
         }
 
         // Tell the player that their defensive pacts will be canceled.
         for (civDiploManager in viewingCiv.diplomacy.values) {
-            if (civDiploManager.otherCiv() != otherCiv
+            if (civDiploManager.otherCiv != otherCiv
                 && civDiploManager.diplomaticStatus == DiplomaticStatus.DefensivePact
-                && !otherCivDefensivePactList.contains(civDiploManager.otherCiv())) {
-                messageLines += "This will cancel your defensive pact with [${civDiploManager.otherCivName}]"
+                && !otherCivDefensivePactList.contains(civDiploManager.otherCiv)) {
+                messageLines += "This will cancel your defensive pact with [${civDiploManager.otherCiv.civName}]"
             }
         }
         return messageLines.joinToString("\n") { "{$it}" }
@@ -331,7 +385,7 @@ class DiplomacyScreen(
         val goToOnMapButton = "Go to on map".toTextButton()
         goToOnMapButton.onClick {
             val worldScreen = UncivGame.Current.resetToWorldScreen()
-            worldScreen.mapHolder.setCenterPosition(civilization.getCapital()!!.location, selectUnit = false)
+            worldScreen.mapHolder.setCenterPosition(civilization.getCapital()!!.location.toHexCoord(), selectUnit = false)
         }
         return goToOnMapButton
     }

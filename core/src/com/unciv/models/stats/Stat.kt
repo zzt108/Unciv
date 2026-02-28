@@ -5,6 +5,8 @@ import com.unciv.logic.civilization.NotificationIcon
 import com.unciv.models.UncivSound
 import com.unciv.ui.components.extensions.colorFromHex
 import com.unciv.ui.components.fonts.Fonts
+import yairm210.purity.annotations.Immutable
+import yairm210.purity.annotations.Pure
 
 enum class Stat(
     val notificationIcon: String,
@@ -18,14 +20,16 @@ enum class Stat(
     Science(NotificationIcon.Science, UncivSound.Chimes, Fonts.science, colorFromHex(0x8c9dff)),
     Culture(NotificationIcon.Culture, UncivSound.Paper, Fonts.culture, colorFromHex(0x8b60ff)),
     Happiness(NotificationIcon.Happiness, UncivSound.Click, Fonts.happiness, colorFromHex(0xffd800)),
-    Faith(NotificationIcon.Faith, UncivSound.Choir, Fonts.faith, colorFromHex(0xcbdfff));
+    Faith(NotificationIcon.Faith, UncivSound.Choir, Fonts.faith, colorFromHex(0xcbdfff))
+    ;
+    val isCityWide by lazy { this !in statsWithCivWideField }
 
     companion object {
-        val statsUsableToBuy = setOf(Gold, Food, Science, Culture, Faith)
-        private val valuesAsMap = entries.associateBy { it.name }
-        fun safeValueOf(name: String) = valuesAsMap[name]
-        fun isStat(name: String) = name in valuesAsMap
-        fun names() = valuesAsMap.keys
-        val statsWithCivWideField = setOf(Gold, Science, Culture, Faith)
+        @Immutable val statsUsableToBuy = setOf(Gold, Food, Science, Culture, Faith)
+        @Immutable private val valuesAsMap = entries.associateBy { it.name }
+        @Pure fun safeValueOf(name: String) = valuesAsMap[name]
+        @Pure fun isStat(name: String) = name in valuesAsMap
+        @Pure fun names() = valuesAsMap.keys
+        val statsWithCivWideField = setOf(Gold, Science, Culture, Faith, Happiness)
     }
 }

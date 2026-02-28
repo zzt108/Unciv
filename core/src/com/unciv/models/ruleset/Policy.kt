@@ -2,12 +2,14 @@ package com.unciv.models.ruleset
 
 import com.unciv.Constants
 import com.unciv.logic.MultiFilter
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueTarget
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
 import com.unciv.ui.objectdescriptions.uniquesToCivilopediaTextLines
 import com.unciv.ui.screens.civilopediascreen.FormattedLine
+import yairm210.purity.annotations.Pure
+import yairm210.purity.annotations.Readonly
 
 open class Policy : RulesetObject() {
     lateinit var branch: PolicyBranch // not in json - added in gameBasics
@@ -32,24 +34,25 @@ open class Policy : RulesetObject() {
         /** Some tests to count policies by completion or not use only the String collection without instantiating them.
          *  To keep the hardcoding in one place, this is public and should be used instead of duplicating it.
          */
-        fun isBranchCompleteByName(name: String) = name.endsWith(branchCompleteSuffix)
+        @Pure fun isBranchCompleteByName(name: String) = name.endsWith(branchCompleteSuffix)
     }
 
-    fun matchesFilter(filter: String, state: StateForConditionals? = null): Boolean =
+    @Readonly
+    fun matchesFilter(filter: String, state: GameContext? = null): Boolean =
         MultiFilter.multiFilter(filter, {
             matchesSingleFilter(filter) ||
-                state != null && hasUnique(filter, state) ||
+                state != null && hasTagUnique(filter, state) ||
                 state == null && hasTagUnique(filter)
         })
 
     // Remember policy branches are duplicated in `policies` (as subclass carrying more information),
     // so filtering by a policy branch name matches only the branch itself, filtering by "[name] branch"
     // will match all policies in that branch plus the branch itself (since the loader sets a branch's branch to itself).
+    @Readonly
     fun matchesSingleFilter(filter: String): Boolean {
         return when(filter) {
             in Constants.all -> true
             name -> true
-            "[all] branch" -> branch == this
             "[${branch.name}] branch" -> true
             else -> false
         }
@@ -68,9 +71,10 @@ open class Policy : RulesetObject() {
 
     override fun makeLink() = "Policy/$name"
     override fun getSortGroup(ruleset: Ruleset) =
-        ruleset.eras[branch.era]!!.eraNumber * 10000 +
+        (ruleset.eras[branch.era]?.eraNumber ?: 0) * 10000 +
                 ruleset.policyBranches.keys.indexOf(branch.name) * 100 +
                 policyBranchType.ordinal
+    override fun getSubCategory(ruleset: Ruleset): String? = branch.name
 
     override fun getCivilopediaTextLines(ruleset: Ruleset): List<FormattedLine> {
         val lineList = ArrayList<FormattedLine>()
@@ -113,7 +117,7 @@ open class Policy : RulesetObject() {
         }
 
         fun isEnabledByPolicy(rulesetObject: IRulesetObject) =
-                rulesetObject.getMatchingUniques(UniqueType.OnlyAvailable, StateForConditionals.IgnoreConditionals).any {
+                rulesetObject.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals).any {
                     it.getModifiers(UniqueType.ConditionalAfterPolicyOrBelief).any { it.params[0] == name } }
                 || rulesetObject.getMatchingUniques(UniqueType.Unavailable).any {
                     it.getModifiers(UniqueType.ConditionalBeforePolicyOrBelief).any { it.params[0] == name }
@@ -132,12 +136,12 @@ open class Policy : RulesetObject() {
 
 
         fun isDisabledByPolicy(rulesetObject: IRulesetObject): Boolean {
-            if (rulesetObject.getMatchingUniques(UniqueType.OnlyAvailable, StateForConditionals.IgnoreConditionals).any {
+            if (rulesetObject.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals).any {
                     it.getModifiers(UniqueType.ConditionalBeforePolicyOrBelief).any { it.params[0] == name }
                 })
                 return true
 
-            if (rulesetObject.getMatchingUniques(UniqueType.Unavailable, StateForConditionals.IgnoreConditionals).any {
+            if (rulesetObject.getMatchingUniques(UniqueType.Unavailable, GameContext.IgnoreConditionals).any {
                     it.getModifiers(UniqueType.ConditionalAfterPolicyOrBelief).any { it.params[0] == name } })
                 return true
             

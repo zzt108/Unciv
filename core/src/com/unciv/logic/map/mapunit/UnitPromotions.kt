@@ -1,11 +1,13 @@
 package com.unciv.logic.map.mapunit
 
 import com.unciv.logic.IsPartOfGameInfoSerialization
-import com.unciv.models.ruleset.unique.StateForConditionals
+import com.unciv.models.ruleset.unique.GameContext
 import com.unciv.models.ruleset.unique.UniqueTriggerActivation
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unit.Promotion
 import com.unciv.ui.components.extensions.toPercent
+import yairm210.purity.annotations.LocalState
+import yairm210.purity.annotations.Readonly
 
 class UnitPromotions : IsPartOfGameInfoSerialization {
     // Having this as mandatory constructor parameter would be safer, but this class is part of a
@@ -32,6 +34,7 @@ class UnitPromotions : IsPartOfGameInfoSerialization {
      *  @param sorted if `true` return the promotions in json order (`false` gives hashset order) for display.
      *  @return a Sequence of this unit's promotions
      */
+    @Readonly
     fun getPromotions(sorted: Boolean = false): Sequence<Promotion> = sequence {
         if (promotions.isEmpty()) return@sequence
         val unitPromotions = unit.civ.gameInfo.ruleset.unitPromotions
@@ -49,16 +52,23 @@ class UnitPromotions : IsPartOfGameInfoSerialization {
     }
 
     /** @return the XP points needed to "buy" the next promotion. 10, 30, 60, 100, 150,... */
-    fun xpForNextPromotion() = Math.round(baseXpForPromotionNumber(numberOfPromotions+1) * promotionCostModifier())
-    
-    /** @return the XP points needed to "buy" the next [count] promotions. */
-    fun xpForNextNPromotions(count: Int) = Math.round((1..count).sumOf { 
-        baseXpForPromotionNumber(numberOfPromotions+count)} * promotionCostModifier() )
+    @Readonly fun xpForNextPromotion(): Int = xpCostForPromotionNumber(numberOfPromotions + 1)
 
-    private fun baseXpForPromotionNumber(numberOfPromotions: Int) = (numberOfPromotions) * 10
-    
+    /** @return the XP points needed to "buy" the next [count] promotions. */
+    @Readonly
+    fun xpForNextNPromotions(count: Int) = (1..count).sumOf {
+        xpCostForPromotionNumber(numberOfPromotions + it)
+    }
+
+    /** @return the final XP cost for a specific promotion number, including modifiers and rounding */
+    @Readonly
+    private fun xpCostForPromotionNumber(promotionNumber: Int): Int {
+        val baseXpForPromotion = promotionNumber * 10
+        return (baseXpForPromotion * promotionCostModifier()).toInt()
+    }
+
+    @Readonly
     private fun promotionCostModifier(): Float {
-       
         var totalPromotionCostModifier = 1f
         for (unique in unit.civ.getMatchingUniques(UniqueType.XPForPromotionModifier)) {
             totalPromotionCostModifier *= unique.params[0].toPercent()
@@ -68,8 +78,9 @@ class UnitPromotions : IsPartOfGameInfoSerialization {
     }
     
     /** @return Total XP including that already "spent" on promotions */
-    fun totalXpProduced() = XP + (numberOfPromotions * (numberOfPromotions + 1)) * 5
+    @Readonly fun totalXpProduced() = XP + (numberOfPromotions * (numberOfPromotions + 1)) * 5
 
+    @Readonly
     fun canBePromoted(): Boolean {
         if (XP < xpForNextPromotion()) return false
         if (getAvailablePromotions().none()) return false
@@ -124,19 +135,23 @@ class UnitPromotions : IsPartOfGameInfoSerialization {
     }
 
     private fun doDirectPromotionEffects(promotion: Promotion) {
-        for (unique in promotion.uniqueObjects)
-            if (unique.conditionalsApply(unit.cache.state)
-                    && !unique.hasTriggerConditional())
+        for (unique in promotion.uniqueObjects) {
+            if (!unique.conditionalsApply(unit.cache.state) || unique.hasTriggerConditional()) continue
+            repeat(unique.getUniqueMultiplier(unit.cache.state)) {
                 UniqueTriggerActivation.triggerUnique(unique, unit, triggerNotificationText = "due to our [${unit.name}] being promoted")
+            }
+        }
     }
 
     /** Gets all promotions this unit could currently "buy" with enough [XP]
      *  Checks unit type, already acquired promotions, prerequisites and incompatibility uniques.
      */
+    @Readonly
     fun getAvailablePromotions(): Sequence<Promotion> {
         return unit.civ.gameInfo.ruleset.unitPromotions.values.asSequence().filter { isAvailable(it) }
     }
 
+    @Readonly
     private fun isAvailable(promotion: Promotion): Boolean {
         if (promotion.name in promotions) return false
         if (unit.type.name !in promotion.unitTypes) return false
@@ -144,16 +159,23 @@ class UnitPromotions : IsPartOfGameInfoSerialization {
 
         val stateForConditionals = unit.cache.state
         if (promotion.hasUnique(UniqueType.Unavailable, stateForConditionals)) return false
-        if (promotion.getMatchingUniques(UniqueType.OnlyAvailable, StateForConditionals.IgnoreConditionals)
+        if (promotion.getMatchingUniques(UniqueType.OnlyAvailable, GameContext.IgnoreConditionals)
             .any { !it.conditionalsApply(stateForConditionals) }) return false
         return true
     }
 
+    @Readonly
     fun clone(): UnitPromotions {
-        val toReturn = UnitPromotions()
+        @LocalState val toReturn = UnitPromotions()
         toReturn.XP = XP
-        toReturn.promotions.addAll(promotions)
+        toReturn.promotions = HashSet(promotions)
         toReturn.numberOfPromotions = numberOfPromotions
+        return toReturn
+    }
+
+    @Readonly
+    fun clone(unit: MapUnit): UnitPromotions {
+        @LocalState val toReturn = clone()
         toReturn.unit = unit
         return toReturn
     }

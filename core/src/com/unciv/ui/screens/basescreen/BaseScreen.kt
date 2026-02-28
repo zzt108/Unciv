@@ -15,7 +15,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton
 import com.badlogic.gdx.scenes.scene2d.ui.TextField
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable
 import com.badlogic.gdx.utils.viewport.ExtendViewport
-import com.unciv.GameStartScreen
+import com.unciv.ui.screens.GameStartScreen
 import com.unciv.UncivGame
 import com.unciv.models.TutorialTrigger
 import com.unciv.models.metadata.BaseRuleset
@@ -36,6 +36,7 @@ import com.unciv.ui.popups.activePopup
 import com.unciv.ui.popups.options.OptionsPopup
 import com.unciv.ui.screens.civilopediascreen.CivilopediaScreen
 import com.unciv.ui.screens.mainmenuscreen.MainMenuScreen
+import com.unciv.ui.screens.worldscreen.WorldScreen
 
 // Both `this is CrashScreen` and `this::createPopupBasedDispatcherVetoer` are flagged.
 // First - not a leak; second - passes out a pure function
@@ -61,12 +62,8 @@ abstract class BaseScreen : Screen {
         /** The ExtendViewport sets the _minimum_(!) world size - the actual world size will be larger, fitted to screen/window aspect ratio. */
         stage = UncivStage(ExtendViewport(height, height))
 
-        if (enableSceneDebug && this !is CrashScreen && this !is GameStartScreen) {
-            stage.setDebugUnderMouse(true)
-            stage.setDebugTableUnderMouse(true)
-            stage.setDebugParentUnderMouse(true)
-            stage.mouseOverDebug = true
-        }
+        if (enableSceneDebug.active && this !is CrashScreen && this !is GameStartScreen)
+            stage.setSceneDebugMode()
 
         @Suppress("LeakingThis")
         stage.installShortcutDispatcher(globalShortcuts, this::createDispatcherVetoer)
@@ -122,12 +119,13 @@ abstract class BaseScreen : Screen {
     fun displayTutorial(tutorial: TutorialTrigger, test: (() -> Boolean)? = null) {
         if (!game.settings.showTutorials) return
         if (game.settings.tutorialsShown.contains(tutorial.name)) return
+        if (this is WorldScreen && this.autoPlay.isAutoPlaying()) return
         if (test != null && !test()) return
         tutorialController.showTutorial(tutorial)
     }
 
     companion object {
-        var enableSceneDebug = false
+        var enableSceneDebug = SceneDebugMode.None
 
         /** Colour to use for empty sections of the screen.
          *  Gets overwritten by SkinConfig.clearColor after starting Unciv */

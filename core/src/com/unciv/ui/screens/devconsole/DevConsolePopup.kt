@@ -1,5 +1,6 @@
 package com.unciv.ui.screens.devconsole
 
+import com.badlogic.gdx.Application
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.Input
 import com.badlogic.gdx.graphics.Color
@@ -25,7 +26,7 @@ import com.unciv.ui.screens.worldscreen.WorldScreen
 import com.unciv.utils.Concurrency
 
 
-class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
+class DevConsolePopup(val screen: WorldScreen) : Popup(screen, Scrollability.All) {
     companion object {
         private const val maxHistorySize = 42
     }
@@ -34,7 +35,7 @@ class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
 
     private var currentHistoryEntry = history.size
 
-    private val textField = UncivTextField("") // always has focus, so a hint won't show
+    internal val textField = UncivTextField("") // always has focus, so a hint won't show
     private val responseLabel = "".toLabel(Color.RED).apply { wrap = true }
     private val inputWrapper = Table()
 
@@ -48,6 +49,7 @@ class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
         add("Developer Console {}".toLabel(fontSize = Constants.headingFontSize)).growX()
         add("Keep open {}".toCheckBox(keepOpen) { keepOpen = it }).right().row()
 
+        textField.maxLength = 1000
         inputWrapper.defaults().space(5f)
         if (!GUI.keyboardAvailable) inputWrapper.add(getAutocompleteButton())
         inputWrapper.add(textField).growX()
@@ -58,10 +60,9 @@ class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
         // Without this, console popup will always contain the key used to open it - won't work perfectly if it's configured to a "dead key"
         textField.addAction(Actions.delay(0.05f, Actions.run { textField.text = "" }))
 
-        add(responseLabel).colspan(2).maxWidth(screen.stage.width * 0.8f)
+        add(responseLabel).colspan(2).minWidth(innerTable.prefWidth).maxWidth(stageToShowOn.width * 0.8f)
 
         keyShortcuts.add(KeyCharAndCode.BACK) { close() }
-        clickBehindToClose = true
 
         textField.keyShortcuts.add(Input.Keys.ENTER, ::onEnter)
         textField.keyShortcuts.add(KeyCharAndCode.TAB, ::onAutocomplete)
@@ -72,6 +73,8 @@ class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
         keyShortcuts.add(Input.Keys.UP) { navigateHistory(-1) }
         keyShortcuts.add(Input.Keys.DOWN) { navigateHistory(1) }
 
+        if (Gdx.app.type != Application.ApplicationType.Android) // I think this might be what's causing Android to fail, not sure
+            setFillParent(false) // ALLOW clicking the map while the console is open!
         open(true)
 
         screen.stage.keyboardFocus = textField
@@ -100,19 +103,25 @@ class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
     }
 
     private fun onAutocomplete() {
-        val (toRemove, toAdd) = getAutocomplete() ?: return
+        val (toRemove, toAdd) = try {
+            getAutocomplete() ?: return
+        } catch (ex: ConsoleErrorException) {
+            showResponse(ex.error, Color.RED)
+            return
+        }
         fun String.removeFromEnd(n: Int) = substring(0, (length - n).coerceAtLeast(0))
         textField.text = textField.text.removeFromEnd(toRemove) + toAdd
         textField.cursorPosition = Int.MAX_VALUE // because the setText implementation actively resets it after the paste it uses (auto capped at length)
+        pack()
     }
-    
+
     private fun onAltDelete() {
         if (!Gdx.input.isAltKeyPressed()) return
-        
+
         Concurrency.runOnGLThread {
             val text = textField.text
             // textField.cursorPosition-1 to avoid the case where we're currently on a space catching the space we're on
-            val lastSpace = text.lastIndexOf(' ', textField.cursorPosition-1) 
+            val lastSpace = text.lastIndexOf(' ', textField.cursorPosition - 1)
             if (lastSpace == -1) {
                 textField.text = text.removeRange(0, textField.cursorPosition)
                 return@runOnGLThread
@@ -208,6 +217,9 @@ class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
     internal fun showResponse(message: String?, color: Color) {
         responseLabel.setText(message)
         responseLabel.style.fontColor = color
+        innerTable.validate()
+        val newHeight = innerTable.prefHeight.coerceIn(120f, maxPopupHeight)
+        getCell(getScrollPane()).height(newHeight)  // Gdx quirks: Or else the ScrollPane's new prefHeight won't be respected
     }
 
     private fun handleCommand(): DevConsoleResponse {
@@ -230,7 +242,7 @@ class DevConsolePopup(val screen: WorldScreen) : Popup(screen) {
         name?.let { getCivByName(it) }
         ?: screen.selectedCiv
     internal fun getCivByNameOrNull(name: CliInput): Civilization? =
-        gameInfo.civilizations.firstOrNull { name.equals(it.civName) }
+        gameInfo.civilizations.firstOrNull { name.equals(it.civID) }
 
     internal fun getSelectedTile() = screen.mapHolder.selectedTile
         ?: throw ConsoleErrorException("Select tile")

@@ -1,25 +1,24 @@
 package com.unciv.ui.screens.overviewscreen
 
 import com.badlogic.gdx.graphics.Color
-import com.badlogic.gdx.math.Vector2
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.utils.Align
 import com.unciv.GUI
+import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.UnitActionType
 import com.unciv.models.UpgradeUnitAction
-import com.unciv.models.ruleset.unit.BaseUnit
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.UncivTooltip.Companion.addTooltip
 import com.unciv.ui.components.extensions.darken
-import com.unciv.ui.components.extensions.toPrettyString
 import com.unciv.ui.components.fonts.Fonts
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.popups.UnitUpgradeMenu
 import com.unciv.ui.screens.pickerscreens.PromotionPickerScreen
 import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsUpgrade
+import yairm210.purity.annotations.Readonly
 
 /**
  *  Helper library for [UnitOverviewTabColumn]
@@ -27,15 +26,8 @@ import com.unciv.ui.screens.worldscreen.unit.actions.UnitActionsUpgrade
  *  Note - this will be made into a companion object by simply inheriting it, so do treat it as singleton
  */
 open class UnitOverviewTabHelpers {
-    /** Create an identifier to support selecting a specific unit - or finding it again after a resort or after an upgrade.
-     *  This is for UI only, as there can be no 100% guarantee the find will succeed or be unambiguous.
-     */
-    internal fun getUnitIdentifier(unit: MapUnit, unitToUpgradeTo: BaseUnit? = null): String {
-        val name = unitToUpgradeTo?.name ?: unit.name
-        return "$name@${unit.getTile().position.toPrettyString()}"
-    }
 
-    private fun showWorldScreenAt(position: Vector2, unit: MapUnit?) {
+    private fun showWorldScreenAt(position: HexCoord, unit: MapUnit?) {
         GUI.resetToWorldScreen()
         GUI.getMap().setCenterPosition(position, forceSelectUnit = unit)
     }
@@ -43,6 +35,7 @@ open class UnitOverviewTabHelpers {
     protected fun showWorldScreenAt(unit: MapUnit) = showWorldScreenAt(unit.currentTile.position, unit)
     protected fun showWorldScreenAt(tile: Tile) = showWorldScreenAt(tile.position, null)
 
+    @Readonly
     private fun getWorkerActionText(unit: MapUnit): String? = when {
         // See UnitTurnManager.endTurn, if..workOnImprovement or UnitGroup.getActionImage: similar logic
         !unit.cache.hasUniqueToBuildImprovements -> null
@@ -52,6 +45,7 @@ open class UnitOverviewTabHelpers {
         else -> unit.currentTile.improvementInProgress
     }
 
+    @Readonly
     protected fun getActionText(unit: MapUnit): String? {
         val workerText by lazy { getWorkerActionText(unit) }
         return when {
@@ -73,12 +67,12 @@ open class UnitOverviewTabHelpers {
         for (unitAction in unitActions) {
             val enable = canEnable && unitAction.action != null
             val unitToUpgradeTo = (unitAction as UpgradeUnitAction).unitToUpgradeTo
-            val selectKey = getUnitIdentifier(unit, unitToUpgradeTo)
+            val selectKey = unit.id.toString()
             val upgradeIcon = ImageGetter.getUnitIcon(unitToUpgradeTo,
                 if (enable) Color.GREEN else Color.GREEN.darken(0.5f))
             upgradeIcon.onClick {
                 UnitUpgradeMenu(actionContext.overviewScreen.stage, upgradeIcon, unit, unitAction, enable) {
-                    actionContext.update()
+                    actionContext.update(true)
                     actionContext.overviewScreen.select(EmpireOverviewCategories.Units, selectKey) // actionContext.select skips setting scrollY
                 }
             }
@@ -88,6 +82,7 @@ open class UnitOverviewTabHelpers {
         return table
     }
 
+    @Readonly @Suppress("purity") // Calls action
     protected fun getUpgradeSortString(unit: MapUnit): String? {
         val upgrade = UnitActionsUpgrade.getUpgradeActionAnywhere(unit).firstOrNull()
             ?: return null
@@ -102,7 +97,7 @@ open class UnitOverviewTabHelpers {
         val promotionsTable = Table()
         val canEnable = actionContext.viewingPlayer.isCurrentPlayer() && GUI.isAllowedChangeState()
         updatePromotionsTable(promotionsTable, unit, canEnable)
-        val selectKey = getUnitIdentifier(unit)
+        val selectKey = unit.id.toString()
 
         fun onPromotionsTableClick() {
             val canPromote = canEnable && unit.promotions.canBePromoted()

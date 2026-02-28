@@ -214,7 +214,7 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
 
             Log.d(LOG_TAG, "start gameNames: ${gameNames.contentToString()}")
 
-            if (currentGameInfo.getCurrentPlayerCivilization().playerId == settings.userId) {
+            if (currentGameInfo.getCurrentPlayerCivilization().playerId == settings.getUserId()) {
                 // May be useful to remind a player that he forgot to complete his turn.
                 val gameIndex = gameIds.indexOf(currentGameInfo.gameId)
                 // If reading the preview file threw an exception, gameIndex will be -1
@@ -223,9 +223,9 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                 }
             } else {
                 val inputData = workDataOf(Pair(FAIL_COUNT, 0), Pair(GAME_ID, gameIds), Pair(GAME_NAME, gameNames),
-                        Pair(USER_ID, settings.userId), Pair(CONFIGURED_DELAY, settings.turnCheckerDelay.seconds),
+                        Pair(USER_ID, settings.getUserId()), Pair(CONFIGURED_DELAY, settings.turnCheckerDelay.seconds),
                         Pair(PERSISTENT_NOTIFICATION_ENABLED, settings.turnCheckerPersistentNotificationEnabled),
-                        Pair(FILE_STORAGE, settings.server),
+                        Pair(FILE_STORAGE, settings.getServer()),
                         Pair(AUTH_HEADER, settings.getAuthHeader()))
 
                 if (settings.turnCheckerPersistentNotificationEnabled) {
@@ -323,7 +323,7 @@ class MultiplayerTurnCheckWorker(appContext: Context, workerParams: WorkerParame
                     Lets hope it works with gamePreview as they are a lot smaller and faster to save
                      */
                     Log.i(LOG_TAG, "doWork save gameName: ${gameNames[idx]}")
-                    files.saveGame(gamePreview, gameNames[idx])
+                    files.saveMultiplayerGamePreview(gamePreview, gameNames[idx])
                     Log.i(LOG_TAG, "doWork save ${gameNames[idx]} done")
 
                     if (currentTurnPlayer.playerId == inputData.getString(USER_ID)!! && foundGame == null) {

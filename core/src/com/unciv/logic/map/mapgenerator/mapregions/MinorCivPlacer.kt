@@ -5,6 +5,7 @@ import com.unciv.logic.map.TileMap
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.Ruleset
 import com.unciv.models.ruleset.unique.UniqueType
+import yairm210.purity.annotations.Readonly
 import kotlin.math.min
 
 object MinorCivPlacer {
@@ -222,13 +223,14 @@ object MinorCivPlacer {
         }
     }
 
+    @Readonly
     private fun canPlaceMinorCiv(tile: Tile, tileData: TileDataMap) = !tile.isWater && !tile.isImpassible() &&
         !tileData[tile.position]!!.isJunk &&
         tile.getBaseTerrain().getMatchingUniques(UniqueType.HasQuality).none { it.params[0] == "Undesirable" } && // So we don't get snow hills
         tile.neighbors.count() == 6 // Avoid map edges
 
     private fun placeMinorCiv(civ: Civilization, tileMap: TileMap, tile: Tile, tileData: TileDataMap, ruleset: Ruleset) {
-        tileMap.addStartingLocation(civ.civName, tile)
+        tileMap.addStartingLocation(civ.civID, tile)
         tileData.placeImpact(MapRegions.ImpactType.MinorCiv,tile, 4)
         tileData.placeImpact(MapRegions.ImpactType.Luxury,  tile, 3)
         tileData.placeImpact(MapRegions.ImpactType.Strategic,tile, 0)

@@ -1,6 +1,7 @@
 package com.unciv.logic
 
 import com.unciv.ui.screens.mainmenuscreen.EasterEggFloatingArt
+import yairm210.purity.annotations.Pure
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -123,7 +124,7 @@ object HolidayDates {
         abstract fun getByYear(year: Int): DateRange
 
         companion object {
-            fun safeValueOf(name: String) = entries.firstOrNull { it.name == name }
+            @Pure fun safeValueOf(name: String) = entries.firstOrNull { it.name == name }
         }
     }
 

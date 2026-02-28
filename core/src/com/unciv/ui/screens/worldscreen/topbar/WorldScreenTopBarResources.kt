@@ -84,7 +84,7 @@ internal class WorldScreenTopBarResources(topbar: WorldScreenTopBar) : ScalingTa
         val yearText = YearTextUtil.toYearText(
             civInfo.gameInfo.getYear(), civInfo.isLongCountDisplay()
         )
-        turnsLabel.setText(Fonts.turn + " " + civInfo.gameInfo.turns.tr() + " | " + yearText)
+        turnsLabel.setText(Fonts.turn + "\u2004" + civInfo.gameInfo.turns.tr() + "\u2004|\u2004" + yearText) // U+2004: Three-Per-Em Space
 
         resourcesWrapper.clearChildren()
         val civResources = civInfo.getCivResourcesByName()
@@ -96,7 +96,7 @@ internal class WorldScreenTopBarResources(topbar: WorldScreenTopBar) : ScalingTa
 
             val amount = civResources[resource.name] ?: 0
 
-            if (!civInfo.tech.isRevealed(resource) && amount == 0) // You cannot trade for resources you cannot process yourself yet
+            if (!civInfo.canSeeResource(resource) && amount == 0) // You cannot trade for resources you cannot process yourself yet
                 continue
 
             resourcesWrapper.add(icon).padLeft(if (index == 0) 0f else extraPadBetweenResources)

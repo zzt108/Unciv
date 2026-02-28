@@ -1,11 +1,11 @@
 package com.unciv.logic.city.managers
 
-import com.badlogic.gdx.math.Vector2
 import com.unciv.logic.IsPartOfGameInfoSerialization
 import com.unciv.logic.automation.Automation
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.NotificationCategory
 import com.unciv.logic.civilization.NotificationIcon
+import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.Counter
 import com.unciv.models.ruleset.unique.LocalUniqueCache
@@ -13,6 +13,7 @@ import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.ui.components.extensions.toPercent
 import com.unciv.utils.withItem
 import com.unciv.utils.withoutItem
+import yairm210.purity.annotations.Readonly
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.pow
@@ -39,16 +40,18 @@ class CityPopulationManager : IsPartOfGameInfoSerialization {
         return toReturn
     }
 
-    fun getNumberOfSpecialists() = getNewSpecialists().values.sum()
+    @Readonly fun getNumberOfSpecialists() = getNewSpecialists().values.sum()
 
+    @Readonly
     fun getFreePopulation(): Int {
         val workingPopulation = city.workedTiles.size
         return population - workingPopulation - getNumberOfSpecialists()
     }
-
+    
+    @Readonly
     fun getFoodToNextPopulation(): Int {
         // civ v math, civilization.wikia
-        var foodRequired = 15 + 6 * (population - 1) + floor((population - 1).toDouble().pow(1.8))
+        var foodRequired = 15 + 8 * (population - 1) + floor((population - 1).toDouble().pow(1.5))
 
         foodRequired *= city.civ.gameInfo.speed.modifier
 
@@ -60,6 +63,7 @@ class CityPopulationManager : IsPartOfGameInfoSerialization {
     }
 
     /** Take null to mean infinity. */
+    @Readonly
     fun getNumTurnsToStarvation(): Int? {
         if (!city.isStarving()) return null
         return foodStored / -city.foodForNextTurn() + 1
@@ -67,6 +71,7 @@ class CityPopulationManager : IsPartOfGameInfoSerialization {
 
 
     /** Take null to mean infinity. */
+    @Readonly
     fun getNumTurnsToNewPopulation(): Int? {
         if (!city.isGrowing()) return null
         val roundedFoodPerTurn = city.foodForNextTurn().toFloat()
@@ -80,6 +85,7 @@ class CityPopulationManager : IsPartOfGameInfoSerialization {
     //endregion
 
     /** Implements [UniqueParameterType.PopulationFilter][com.unciv.models.ruleset.unique.UniqueParameterType.PopulationFilter] */
+    @Readonly
     fun getPopulationFilterAmount(filter: String): Int {
         return when (filter) {
             "Specialists" -> getNumberOfSpecialists()
@@ -207,7 +213,7 @@ class CityPopulationManager : IsPartOfGameInfoSerialization {
         city.cityStats.update()
     }
 
-    fun stopWorkingTile(position: Vector2) {
+    fun stopWorkingTile(position: HexCoord) {
         city.workedTiles = city.workedTiles.withoutItem(position)
         city.lockedTiles.remove(position)
     }
@@ -273,6 +279,7 @@ class CityPopulationManager : IsPartOfGameInfoSerialization {
         }
     }
 
+    @Readonly
     fun getMaxSpecialists(): Counter<String> {
         val counter = Counter<String>()
         for (building in city.cityConstructions.getBuiltBuildings())

@@ -172,4 +172,30 @@ class AiStatusExporterTest {
         assertTrue("Should export standard natural wonder", result.contains("Natural Wonder: Barringer Crater"))
         assertTrue("Should export baseTerrain natural wonder", result.contains("Natural Wonder: Fountain of Youth"))
     }
+
+    @Test
+    fun testUnitPromotionsExport() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(1)
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+
+        val warrior = testGame.addUnit("Warrior", civ, testGame.getTile(0, 0))
+        warrior.promotions.addPromotion("Drill I", true)
+        warrior.promotions.addPromotion("Drill II", true)
+        warrior.promotions.addPromotion("Drill III", true)
+
+        val archer = testGame.addUnit("Archer", civ, testGame.getTile(1, 0))
+        archer.promotions.addPromotion("Accuracy I", true)
+
+        val worker = testGame.addUnit("Worker", civ, testGame.getTile(0, 1))
+
+        val result = AiStatusExporter.generateAiStatusReport(civ)
+
+        assertTrue("Should group and show effective promotions", result.contains("- 1 Warrior (Drill III)"))
+        assertTrue("Should show single promotion", result.contains("- 1 Archer (Accuracy I)"))
+        assertTrue("Should show unpromoted unit", result.contains("- 1 Worker"))
+        assertTrue("Should not show prerequisite promotion", !result.contains("Drill I,") && !result.contains("Drill I)") && !result.contains("Drill II,") && !result.contains("Drill II)"))
+    }
 }

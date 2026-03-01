@@ -291,7 +291,18 @@ object AiStatusExporter {
         } else {
             val unitCounts = HashMap<String, Int>()
             for (unit in civ.units.getCivUnits()) {
-                val name = unit.name
+                val allPromotions = unit.promotions.promotions
+                val allPrerequisites = mutableSetOf<String>()
+                val queue = ArrayDeque(allPromotions.flatMap { civ.gameInfo.ruleset.unitPromotions[it]?.prerequisites ?: emptyList() })
+                while (queue.isNotEmpty()) {
+                    val p = queue.removeFirst()
+                    if (allPrerequisites.add(p)) {
+                        queue.addAll(civ.gameInfo.ruleset.unitPromotions[p]?.prerequisites ?: emptyList())
+                    }
+                }
+                val effectivePromotions = allPromotions.filter { it !in allPrerequisites }.sorted()
+                val promotionsStr = if (effectivePromotions.isNotEmpty()) " (${effectivePromotions.joinToString(", ")})" else ""
+                val name = unit.name + promotionsStr
                 unitCounts[name] = (unitCounts[name] ?: 0) + 1
             }
             for ((name, count) in unitCounts) {

@@ -1,6 +1,8 @@
 package com.unciv.ui.screens.overviewscreen
 
+import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.graphics.Color
+import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.logic.civilization.AiStatusExporter
@@ -11,6 +13,7 @@ import com.unciv.ui.components.extensions.toTextButton
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.widgets.TabbedPager
 import com.unciv.ui.images.ImageGetter
+import com.unciv.ui.popups.ToastPopup
 import com.unciv.ui.screens.basescreen.BaseScreen
 import com.unciv.ui.screens.basescreen.RecreateOnResize
 import com.unciv.ui.screens.overviewscreen.EmpireOverviewCategories.EmpireOverviewTabState
@@ -81,12 +84,12 @@ class EmpireOverviewScreen(
         val exportButton = "Export Status for AI".toTextButton()
         exportButton.onClick {
             val reportText = AiStatusExporter.generateAiStatusReport(viewingPlayer)
-            com.badlogic.gdx.Gdx.app.clipboard.contents = reportText
-            com.unciv.ui.popups.ToastPopup("Status exported to clipboard for AI!", stage)
+            Gdx.app.clipboard.contents = reportText
+            ToastPopup("Status exported to clipboard for AI!", stage)
         }
 
         val headerTable =
-                com.badlogic.gdx.scenes.scene2d.ui.Table().apply {
+                Table().apply {
                     add(exportButton).padRight(10f)
                     add(closeButton)
                 }

@@ -78,7 +78,7 @@ object AiStatusExporter {
         } else {
             val unitCounts = HashMap<String, Int>()
             for (unit in civ.units.getCivUnits()) {
-                val name = unit.type.name
+                val name = unit.name
                 unitCounts[name] = (unitCounts[name] ?: 0) + 1
             }
             for ((name, count) in unitCounts) {
@@ -93,8 +93,9 @@ object AiStatusExporter {
         for (otherCiv in civ.getKnownCivs()) {
             if (otherCiv.isBarbarian) continue
             hasDiplomacy = true
+            val type = if (otherCiv.isCityState) "City-State" else "Major"
             val status = if (civ.isAtWarWith(otherCiv)) "At War" else "Peace"
-            sb.append("- **${otherCiv.civName}:** $status\n")
+            sb.append("- **${otherCiv.civName}** ($type): $status\n")
         }
         if (!hasDiplomacy) sb.append("- No known civilizations.\n")
 

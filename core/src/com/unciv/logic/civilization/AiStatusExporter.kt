@@ -29,8 +29,9 @@ object AiStatusExporter {
             val ruleSetName = civ.gameInfo.ruleset.name.ifEmpty { "Standard" }
             sb.append("Ruleset: $ruleSetName. ")
             sb.append(
-                    "Map coordinates are [x,y] on a hex grid. Tactical Radar sections summarize threats within 3 tiles of cities. "
+                    "Map coordinates are [x,y] on a hex grid where X increases to the North-West and Y increases to the North-East. "
             )
+            sb.append("Tactical Radar sections summarize threats and POIs within 3 tiles of cities. ")
             sb.append("Use this data to provide tactical, economic, and diplomatic advice.\n")
             sb.append("</system_context>\n\n")
         }

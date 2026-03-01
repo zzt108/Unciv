@@ -117,4 +117,26 @@ class AiStatusExporterTest {
         )
         assertTrue("Should show turns-to-completion", result.contains("turns)"))
     }
+
+    @Test
+    fun testTechAndReligionExport() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(1)
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+
+        // Setup Tech
+        civ.tech.techsResearched.add("Agriculture")
+        civ.tech.techsResearched.add("Pottery")
+
+        // Setup Golden Age
+        civ.goldenAges.addHappiness(1000)
+        civ.goldenAges.endTurn(0)
+
+        // Generate Report
+        val result = AiStatusExporter.generateAiStatusReport(civ)
+
+        assertTrue("Should show golden age", result.contains("**Golden Age:** Active"))
+    }
 }

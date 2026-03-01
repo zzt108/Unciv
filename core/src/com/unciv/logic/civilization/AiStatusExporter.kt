@@ -72,15 +72,23 @@ object AiStatusExporter {
                                     .filter { civ.tech.canBeResearched(it.name) }
                                     .sortedBy { it.column?.columnNumber ?: 0 }
                                     .map { it.name }
-                    val availableStr = availableTechs.take(3).joinToString(", ")
-                    val ellipsis = if (availableTechs.size > 3) "..." else ""
-                    "None (Available: $availableStr$ellipsis)"
+                    if (availableTechs.isEmpty()) {
+                        "None (All technologies researched)"
+                    } else {
+                        val availableStr = availableTechs.joinToString(", ")
+                        "None (Available: $availableStr)"
+                    }
                 }
+
+        val goldenAgeTurns = civ.goldenAges.turnsLeftForCurrentGoldenAge
+        val goldenAgeProgress = "${civ.goldenAges.storedHappiness}/${civ.goldenAges.happinessRequiredForNextGoldenAge()}"
+        val goldenAgeStr = if (civ.goldenAges.isGoldenAge()) "Active ($goldenAgeTurns turns remaining)" else "Inactive (Progress: $goldenAgeProgress)"
 
         sb.append("## Global Empire Status\n")
         sb.append("- **Turn:** $turn\n")
         sb.append("- **Era:** $era\n")
         sb.append("- **Global Happiness:** $happiness\n")
+        sb.append("- **Golden Age:** $goldenAgeStr\n")
         sb.append("- **Total Gold:** $totalGold (GPT: $gpt)\n")
         sb.append("- **Science:** $science\n")
         sb.append("- **Culture:** $culture\n")
@@ -100,6 +108,25 @@ object AiStatusExporter {
         }
         if (!hasPolicies) sb.append("- None\n")
         sb.append("</global_status>\n\n")
+
+        // Religion & Beliefs
+        val religion = civ.religionManager.religion
+        val majorityReligion = civ.religionManager.getMajorityReligion()
+        
+        if (religion != null || majorityReligion != null) {
+            sb.append("<religion_data>\n")
+            sb.append("## Religion & Beliefs\n")
+            if (religion != null) {
+                val beliefsStr = religion.getAllBeliefsOrdered().map { it.name }.joinToString(", ")
+                val type = if (religion.isPantheon()) "Pantheon" else "Religion"
+                val beliefsFormatted = if (beliefsStr.isNotEmpty()) " ($beliefsStr)" else ""
+                sb.append("- **Founded $type:** ${religion.getReligionDisplayName()}$beliefsFormatted\n")
+            }
+            if (majorityReligion != null && majorityReligion.name != religion?.name) {
+                sb.append("- **Majority Religion:** ${majorityReligion.getReligionDisplayName()}\n")
+            }
+            sb.append("</religion_data>\n\n")
+        }
 
         // Map Data
         sb.append("<map_data>\n")

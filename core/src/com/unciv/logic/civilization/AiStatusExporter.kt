@@ -2,6 +2,7 @@ package com.unciv.logic.civilization
 
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.HexMath
+import com.unciv.models.ruleset.tile.TerrainType
 import com.unciv.models.stats.Stat
 import kotlin.math.atan2
 import kotlin.math.ceil
@@ -161,8 +162,14 @@ object AiStatusExporter {
                 priority = minOf(priority, if (civUnit.civ != civ) 2 else 4)
             }
 
-            if (tile.isNaturalWonder()) {
-                tileNotes.add("Natural Wonder: ${tile.naturalWonder}")
+            // Workaround: Some natural wonders (like Fountain of Youth) are stored as 
+            // the baseTerrain rather than in the naturalWonder field directly.
+            // tile.isNaturalWonder() only checks the naturalWonder field and will miss them.
+            val naturalWonderName = tile.naturalWonder 
+                ?: tile.allTerrains.firstOrNull { it.type == TerrainType.NaturalWonder }?.name
+
+            if (naturalWonderName != null) {
+                tileNotes.add("Natural Wonder: $naturalWonderName")
                 priority = minOf(priority, 2)
             }
 

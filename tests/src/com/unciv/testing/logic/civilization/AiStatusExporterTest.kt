@@ -145,4 +145,31 @@ class AiStatusExporterTest {
 
         assertTrue("Should show golden age", result.contains("**Golden Age:** Active"))
     }
+
+    @Test
+    fun testNaturalWonderExport() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(1)
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+
+        val tileNormal = testGame.getTile(0, 0)
+        tileNormal.baseTerrain = "Grassland"
+        tileNormal.naturalWonder = "Barringer Crater"
+        tileNormal.setTerrainTransients()
+
+        val tileBaseTerrainWonder = testGame.getTile(1, 0)
+        // Works because TestGame uses standard ruleset which has "Fountain of Youth" as TerrainType.NaturalWonder
+        tileBaseTerrainWonder.baseTerrain = "Fountain of Youth"
+        // naturalWonder field is null by default for "Fountain of Youth" in saves
+        tileBaseTerrainWonder.setTerrainTransients()
+
+        civ.viewableTiles = setOf(tileNormal, tileBaseTerrainWonder)
+
+        val result = AiStatusExporter.generateAiStatusReport(civ)
+
+        assertTrue("Should export standard natural wonder", result.contains("Natural Wonder: Barringer Crater"))
+        assertTrue("Should export baseTerrain natural wonder", result.contains("Natural Wonder: Fountain of Youth"))
+    }
 }

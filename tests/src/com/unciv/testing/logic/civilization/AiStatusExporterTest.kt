@@ -42,4 +42,79 @@ class AiStatusExporterTest {
         assertTrue(result.contains("Roma"))
         assertTrue(result.contains("Pop 1"))
     }
+
+    @Test
+    fun testHexDirectionLogic() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(2)
+
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+
+        val enemyNation = Nation()
+        enemyNation.name = "Barbarians"
+        val enemyCiv = testGame.addCiv(enemyNation)
+
+        val cityTile = testGame.getTile(0, 0)
+        val city = testGame.addCity(civ, cityTile)
+        city.name = "Roma"
+
+        // Based on clockPositionToHexcoordMap in HexMath:
+        // 12 o'clock is (1, 1) -> N
+        testGame.addUnit("Warrior", enemyCiv, testGame.getTile(1, 1)).apply { name = "Warrior_N" }
+        // 2 o'clock is (0, 1) -> NE
+        testGame.addUnit("Warrior", enemyCiv, testGame.getTile(0, 1)).apply { name = "Warrior_NE" }
+        // 4 o'clock is (-1, 0) -> SE
+        testGame.addUnit("Warrior", enemyCiv, testGame.getTile(-1, 0)).apply { name = "Warrior_SE" }
+        // 6 o'clock is (-1, -1) -> S
+        testGame.addUnit("Warrior", enemyCiv, testGame.getTile(-1, -1)).apply { name = "Warrior_S" }
+        // 8 o'clock is (0, -1) -> SW
+        testGame.addUnit("Warrior", enemyCiv, testGame.getTile(0, -1)).apply { name = "Warrior_SW" }
+        // 10 o'clock is (1, 0) -> NW
+        testGame.addUnit("Warrior", enemyCiv, testGame.getTile(1, 0)).apply { name = "Warrior_NW" }
+
+        val result = AiStatusExporter.generateAiStatusReport(civ)
+
+        assertTrue(result.contains("**N, Dist 1**: Enemy Unit: Warrior_N"))
+        assertTrue(result.contains("**NE, Dist 1**: Enemy Unit: Warrior_NE"))
+        assertTrue(result.contains("**SE, Dist 1**: Enemy Unit: Warrior_SE"))
+        assertTrue(result.contains("**S, Dist 1**: Enemy Unit: Warrior_S"))
+        assertTrue(result.contains("**SW, Dist 1**: Enemy Unit: Warrior_SW"))
+        assertTrue(result.contains("**NW, Dist 1**: Enemy Unit: Warrior_NW"))
+    }
+
+    @Test
+    fun testResearchExport() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(1)
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+
+        // Case 1: No research selected
+        civ.tech.techsToResearch.clear()
+        var result = AiStatusExporter.generateAiStatusReport(civ)
+        assertTrue(
+                "Should show available techs",
+                result.contains("**Current Research:** None (Available:")
+        )
+
+        // Case 2: Research selected
+        val techName =
+                civ.gameInfo
+                        .ruleset
+                        .technologies
+                        .values
+                        .filter { civ.tech.canBeResearched(it.name) }
+                        .first()
+                        .name
+        civ.tech.techsToResearch.add(techName)
+        result = AiStatusExporter.generateAiStatusReport(civ)
+        assertTrue(
+                "Should show current tech and turns",
+                result.contains("**Current Research:** $techName")
+        )
+        assertTrue("Should show turns-to-completion", result.contains("turns)"))
+    }
 }

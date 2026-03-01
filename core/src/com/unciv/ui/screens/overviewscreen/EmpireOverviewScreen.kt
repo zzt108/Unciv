@@ -8,7 +8,9 @@ import com.unciv.GUI
 import com.unciv.logic.civilization.AiStatusExporter
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.Notification
+import com.unciv.ui.components.UncivTooltip.Companion.addTooltip
 import com.unciv.ui.components.extensions.getCloseButton
+import com.unciv.ui.components.extensions.toCheckBox
 import com.unciv.ui.components.extensions.toTextButton
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.widgets.TabbedPager
@@ -81,15 +83,22 @@ class EmpireOverviewScreen(
 
         val closeButton = getCloseButton { game.popScreen() }
 
-        val exportButton = "Export Status for AI".toTextButton()
+        val includeContextCheckbox = "Context".toCheckBox(persistState.includeContextForAiExport) {
+            persistState.includeContextForAiExport = it
+            game.settings.save()
+        }
+        includeContextCheckbox.addTooltip("Check to include the Unciv ruleset and map instructions (Recommended for new AI chats)")
+
+        val exportButton = "Copy Status".toTextButton()
         exportButton.onClick {
-            val reportText = AiStatusExporter.generateAiStatusReport(viewingPlayer)
+            val reportText = AiStatusExporter.generateAiStatusReport(viewingPlayer, includeContextCheckbox.isChecked)
             Gdx.app.clipboard.contents = reportText
-            ToastPopup("Status exported to clipboard for AI!", stage)
+            ToastPopup("Status for AI copied to clipboard!", stage)
         }
 
         val headerTable =
                 Table().apply {
+                    add(includeContextCheckbox).padRight(10f)
                     add(exportButton).padRight(10f)
                     add(closeButton)
                 }

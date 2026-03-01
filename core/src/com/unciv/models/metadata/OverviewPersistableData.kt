@@ -12,6 +12,7 @@ class OverviewPersistableData(
     Map<EmpireOverviewCategories, EmpireOverviewTab.EmpireOverviewTabPersistableData> by map
 {
     var last: EmpireOverviewCategories = EmpireOverviewCategories.Cities
+    var includeContextForAiExport: Boolean = true
 
     fun update(pageObjects: Map<EmpireOverviewCategories, EmpireOverviewTab>) {
         for ((category, page) in pageObjects)
@@ -26,6 +27,8 @@ class OverviewPersistableData(
     override fun write(json: Json) {
         if (last != EmpireOverviewCategories.Cities)
             json.writeValue("last", last.name, String::class.java)
+        if (!includeContextForAiExport)
+            json.writeValue("includeContextForAiExport", includeContextForAiExport, Boolean::class.java)
         for ((category, data) in map) {
             val clazz = category.getPersistDataClass() ?: continue
             if (data.isEmpty()) continue
@@ -41,6 +44,10 @@ class OverviewPersistableData(
     override fun read(json: Json, jsonData: JsonValue) {
         val lastName = jsonData.get("last")?.asString() // Nullable, benign if field missing - getString() is not.
         EmpireOverviewCategories.entries.firstOrNull { it.name == lastName }?.let { last = it }
+        val includeContext = jsonData.get("includeContextForAiExport")
+        if (includeContext != null && includeContext.isBoolean) {
+            includeContextForAiExport = includeContext.asBoolean()
+        }
         if (jsonData.isObject && jsonData.notEmpty())
             for (element in jsonData) readEntry(json, element)
     }

@@ -34,13 +34,19 @@ class AiStatusExporterTest {
         val city = testGame.addCity(civ, testGame.getTile(0, 0))
         city.name = "Roma"
 
-        val result = AiStatusExporter.generateAiStatusReport(civ)
+        var result = AiStatusExporter.generateAiStatusReport(civ)
 
         assertTrue(result.contains("AI Status Report for Rome"))
         assertTrue(result.contains("Global Empire Status"))
+        assertTrue(result.contains("Ruleset:"))
         assertTrue(result.contains("City Reports"))
         assertTrue(result.contains("Roma"))
         assertTrue(result.contains("Pop 1"))
+
+        result = AiStatusExporter.generateAiStatusReport(civ, includeSystemContext = false)
+        assertTrue(result.contains("AI Status Report for Rome"))
+        assertTrue(!result.contains("<system_context>"))
+        assertTrue(!result.contains("Ruleset:"))
     }
 
     @Test

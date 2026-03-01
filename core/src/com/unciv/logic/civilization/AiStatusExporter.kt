@@ -13,23 +13,27 @@ object AiStatusExporter {
      * English. Note: Must be called on GL thread as it accesses Stats that may be updated
      * concurrently.
      */
-    fun generateAiStatusReport(civ: Civilization): String {
+    fun generateAiStatusReport(civ: Civilization, includeSystemContext: Boolean = true): String {
         if (civ.isSpectator()) {
             return "Spectator mode - no civilization data available."
         }
 
         val sb = StringBuilder()
         sb.append("<unciv_export>\n")
-        sb.append("<system_context>\n")
-        sb.append(
-                "You are an AI advisor for the game Unciv (an open-source Civilization V clone). "
-        )
-        sb.append("The following data represents the current state of the player's empire. ")
-        sb.append(
-                "Map coordinates are [x,y] on a hex grid. Tactical Radar sections summarize threats within 3 tiles of cities. "
-        )
-        sb.append("Use this data to provide tactical, economic, and diplomatic advice.\n")
-        sb.append("</system_context>\n\n")
+        if (includeSystemContext) {
+            sb.append("<system_context>\n")
+            sb.append(
+                    "You are an AI advisor for the game Unciv (an open-source Civilization V clone). "
+            )
+            sb.append("The following data represents the current state of the player's empire. ")
+            val ruleSetName = civ.gameInfo.ruleset.name.ifEmpty { "Standard" }
+            sb.append("Ruleset: $ruleSetName. ")
+            sb.append(
+                    "Map coordinates are [x,y] on a hex grid. Tactical Radar sections summarize threats within 3 tiles of cities. "
+            )
+            sb.append("Use this data to provide tactical, economic, and diplomatic advice.\n")
+            sb.append("</system_context>\n\n")
+        }
 
         sb.append("<global_status>\n")
         sb.append("# AI Status Report for ${civ.civName}\n\n")

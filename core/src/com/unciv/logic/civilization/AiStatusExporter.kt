@@ -27,8 +27,6 @@ object AiStatusExporter {
                     "You are an AI advisor for the game Unciv (an open-source Civilization V clone). "
             )
             sb.append("The following data represents the current state of the player's empire. ")
-            val ruleSetName = civ.gameInfo.ruleset.name.ifEmpty { "Standard" }
-            sb.append("Ruleset: $ruleSetName. ")
             sb.append(
                     "Map coordinates are [x,y] on a hex grid where X increases to the North-West and Y increases to the North-East. "
             )
@@ -89,8 +87,10 @@ object AiStatusExporter {
         val goldenAgeTurns = civ.goldenAges.turnsLeftForCurrentGoldenAge
         val goldenAgeProgress = "${civ.goldenAges.storedHappiness}/${civ.goldenAges.happinessRequiredForNextGoldenAge()}"
         val goldenAgeStr = if (civ.goldenAges.isGoldenAge()) "Active ($goldenAgeTurns turns remaining)" else "Inactive (Progress: $goldenAgeProgress)"
+        val baseRuleset = civ.gameInfo.gameParameters.baseRuleset
 
         sb.append("## Global Empire Status\n")
+        sb.append("- **baseRuleset:** $baseRuleset\n")
         sb.append("- **Turn:** $turn\n")
         sb.append("- **Era:** $era\n")
         sb.append("- **Global Happiness:** $happiness\n")

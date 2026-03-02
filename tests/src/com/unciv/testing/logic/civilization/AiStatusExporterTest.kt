@@ -38,7 +38,7 @@ class AiStatusExporterTest {
 
         assertTrue(result.contains("AI Status Report for Rome"))
         assertTrue(result.contains("Global Empire Status"))
-        assertTrue(result.contains("Ruleset:"))
+        assertTrue(result.contains("baseRuleset:"))
         assertTrue(result.contains("City Reports"))
         assertTrue(result.contains("Roma"))
         assertTrue(result.contains("Pop 1"))
@@ -46,7 +46,7 @@ class AiStatusExporterTest {
         result = AiStatusExporter.generateAiStatusReport(civ, includeSystemContext = false)
         assertTrue(result.contains("AI Status Report for Rome"))
         assertTrue(!result.contains("<system_context>"))
-        assertTrue(!result.contains("Ruleset:"))
+        assertTrue(result.contains("baseRuleset:"))
     }
 
     @Test

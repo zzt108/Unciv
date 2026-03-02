@@ -88,9 +88,13 @@ object AiStatusExporter {
         val goldenAgeProgress = "${civ.goldenAges.storedHappiness}/${civ.goldenAges.happinessRequiredForNextGoldenAge()}"
         val goldenAgeStr = if (civ.goldenAges.isGoldenAge()) "Active ($goldenAgeTurns turns remaining)" else "Inactive (Progress: $goldenAgeProgress)"
         val baseRuleset = civ.gameInfo.gameParameters.baseRuleset
+        val activeMods = civ.gameInfo.gameParameters.mods
 
         sb.append("## Global Empire Status\n")
-        sb.append("- **baseRuleset:** $baseRuleset\n")
+        sb.append("- **Base Ruleset:** $baseRuleset\n")
+        if (activeMods.isNotEmpty()) {
+            sb.append("- **Active Mods:** ${activeMods.joinToString(", ")}\n")
+        }
         sb.append("- **Turn:** $turn\n")
         sb.append("- **Era:** $era\n")
         sb.append("- **Global Happiness:** $happiness\n")

@@ -98,12 +98,15 @@ class AiStatusExporterTest {
         nation.name = "Rome"
         val civ = testGame.addCiv(nation)
 
-        // Case 1: No research selected
+        // Case 1: No research selected, test leaf tech and available tech display
         civ.tech.techsToResearch.clear()
+        civ.tech.techsResearched.add("Agriculture")
+        civ.tech.techsResearched.add("Pottery")
         var result = AiStatusExporter.generateAiStatusReport(civ)
+        
         assertTrue(
-                "Should show available techs",
-                result.contains("**Current Research:** None (Available:")
+                "Should show leaf and available techs: $result",
+                result.contains("**Current Research:** None (Researched: Agriculture, Pottery | Available:")
         )
 
         // Case 2: Research selected

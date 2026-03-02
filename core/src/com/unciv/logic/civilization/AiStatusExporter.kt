@@ -76,11 +76,32 @@ object AiStatusExporter {
                                     .filter { civ.tech.canBeResearched(it.name) }
                                     .sortedBy { it.column?.columnNumber ?: 0 }
                                     .map { it.name }
-                    if (availableTechs.isEmpty()) {
+
+                    val allTechs = civ.gameInfo.ruleset.technologies.values
+                    val childrenByParent = allTechs.flatMap { tech ->
+                        tech.prerequisites.map { it to tech }
+                    }.groupBy({ it.first }, { it.second })
+
+                    val leafTechs =
+                            civ.tech.techsResearched
+                                    .mapNotNull { civ.gameInfo.ruleset.technologies[it] }
+                                    .filter { tech ->
+                                        val descendants = childrenByParent[tech.name]
+                                        descendants == null || descendants.any { !civ.tech.isResearched(it.name) }
+                                    }
+                                    .sortedBy { it.column?.columnNumber ?: 0 }
+                                    .map { it.name }
+
+                    val leafStr = if (leafTechs.isNotEmpty()) "Researched: ${leafTechs.joinToString(", ")}" else ""
+                    val availableStr = if (availableTechs.isNotEmpty()) "Available: ${availableTechs.joinToString(", ")}" else ""
+
+                    val parts = listOf(leafStr, availableStr).filter { it.isNotEmpty() }
+                    if (parts.isEmpty()) {
                         "None (All technologies researched)"
+                    } else if (availableTechs.isEmpty()) {
+                        "None (All technologies researched. $leafStr)"
                     } else {
-                        val availableStr = availableTechs.joinToString(", ")
-                        "None (Available: $availableStr)"
+                        "None (${parts.joinToString(" | ")})"
                     }
                 }
 

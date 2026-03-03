@@ -1,5 +1,6 @@
-package com.unciv.logic.civilization
+package com.unciv.logic.civilization.aiexport
 
+import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.HexMath
 import com.unciv.models.ruleset.tile.TerrainType

@@ -1,29 +1,21 @@
 package com.unciv.ui.screens.overviewscreen
 
-import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.graphics.Color
-import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.unciv.Constants
 import com.unciv.GUI
-import com.unciv.logic.civilization.AiStatusExporter
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.Notification
-import com.unciv.ui.components.UncivTooltip.Companion.addTooltip
 import com.unciv.ui.components.extensions.getCloseButton
-import com.unciv.ui.components.extensions.toCheckBox
-import com.unciv.ui.components.extensions.toTextButton
-import com.unciv.ui.components.input.onClick
 import com.unciv.ui.components.widgets.TabbedPager
 import com.unciv.ui.images.ImageGetter
-import com.unciv.ui.popups.ToastPopup
 import com.unciv.ui.screens.basescreen.BaseScreen
 import com.unciv.ui.screens.basescreen.RecreateOnResize
 import com.unciv.ui.screens.overviewscreen.EmpireOverviewCategories.EmpireOverviewTabState
 
 class EmpireOverviewScreen(
-        private var viewingPlayer: Civilization,
-        defaultCategory: EmpireOverviewCategories? = null,
-        selection: String = ""
+    private var viewingPlayer: Civilization,
+    defaultCategory: EmpireOverviewCategories? = null,
+    selection: String = ""
 ) : BaseScreen(), RecreateOnResize {
     // 50 normal button height + 2*10 topTable padding + 2 Separator + 2*5 centerTable padding
     // Since a resize recreates this screen this should be fine as a val
@@ -45,35 +37,27 @@ class EmpireOverviewScreen(
         val selectCategory = defaultCategory ?: persistState.last
         val iconSize = Constants.defaultFontSize.toFloat()
 
-        tabbedPager =
-                TabbedPager(
-                        stage.width,
-                        stage.width,
-                        centerAreaHeight,
-                        centerAreaHeight,
-                        separatorColor = Color.WHITE,
-                        capacity = EmpireOverviewCategories.entries.size
-                )
+        tabbedPager = TabbedPager(
+            stage.width, stage.width,
+            centerAreaHeight, centerAreaHeight,
+            separatorColor = Color.WHITE,
+            capacity = EmpireOverviewCategories.entries.size)
 
         for (category in EmpireOverviewCategories.entries) {
             val tabState = category.testState(viewingPlayer)
             if (tabState == EmpireOverviewTabState.Hidden) continue
-            val icon =
-                    if (category.iconName.isEmpty()) null
-                    else ImageGetter.getImage(category.iconName)
+            val icon = if (category.iconName.isEmpty()) null else ImageGetter.getImage(category.iconName)
             val pageObject = category.createTab(viewingPlayer, this, persistState[category])
             pageObject.pad(10f, 0f, 10f, 0f)
             pageObjects[category] = pageObject
-            val index =
-                    tabbedPager.addPage(
-                            caption = category.name,
-                            content = pageObject,
-                            icon,
-                            iconSize,
-                            disabled = tabState != EmpireOverviewTabState.Normal,
-                            shortcutKey = category.shortcutKey,
-                            scrollAlign = category.scrollAlign
-                    )
+            val index = tabbedPager.addPage(
+                caption = category.name,
+                content = pageObject,
+                icon, iconSize,
+                disabled = tabState != EmpireOverviewTabState.Normal,
+                shortcutKey = category.shortcutKey,
+                scrollAlign = category.scrollAlign
+            )
             if (category == selectCategory) {
                 tabbedPager.selectPage(index)
                 select(pageObject, selection)
@@ -82,37 +66,15 @@ class EmpireOverviewScreen(
         persistState.update(pageObjects)
 
         val closeButton = getCloseButton { game.popScreen() }
-
-        val includeContextCheckbox = "Context".toCheckBox(persistState.includeContextForAiExport) {
-            persistState.includeContextForAiExport = it
-            game.settings.save()
-        }
-        includeContextCheckbox.addTooltip("Check to include the Unciv ruleset and map instructions (Recommended for new AI chats)")
-
-        val exportButton = "Copy Status".toTextButton()
-        exportButton.onClick {
-            val reportText = AiStatusExporter.generateAiStatusReport(viewingPlayer, includeContextCheckbox.isChecked)
-            Gdx.app.clipboard.contents = reportText
-            ToastPopup("Status for AI copied to clipboard!", stage)
-        }
-
-        val headerTable =
-                Table().apply {
-                    add(includeContextCheckbox).padRight(10f)
-                    add(exportButton).padRight(10f)
-                    add(closeButton)
-                }
-
+        val headerTable = com.unciv.ui.screens.overviewscreen.aiexport.createAiExportHeader(viewingPlayer, closeButton)
         tabbedPager.decorateHeader(headerTable)
 
         tabbedPager.setFillParent(true)
         stage.addActor(tabbedPager)
-    }
+   }
 
     override fun recreate(): BaseScreen {
-        tabbedPager.selectPage(
-                -1
-        ) // trigger deselect on _old_ instance so the tabs can persist their stuff
+        tabbedPager.selectPage(-1)  // trigger deselect on _old_ instance so the tabs can persist their stuff
         return EmpireOverviewScreen(viewingPlayer, persistState.last)
     }
 
@@ -132,10 +94,9 @@ class EmpireOverviewScreen(
     }
 
     /** Helper to show the world screen with a temporary "one-time" notification */
-    // Here because it's common to notification history, resource finder, and city WLTK demanded
-    // resource
+    // Here because it's common to notification history, resource finder, and city WLTK demanded resource
     internal fun showOneTimeNotification(notification: Notification?) {
-        if (notification == null) return // Convenience - easier than a return@lambda for a caller
+        if (notification == null) return  // Convenience - easier than a return@lambda for a caller
         val worldScreen = GUI.getWorldScreen()
         worldScreen.notificationsScroll.oneTimeNotification = notification
         GUI.resetToWorldScreen()
@@ -144,16 +105,10 @@ class EmpireOverviewScreen(
     }
 
     override fun resume() {
-        // This is called by UncivGame.popScreen - e.g. after City Tab opened a City and the user
-        // closes that CityScreen...
-        // Notify the current tab via its IPageExtensions.activated entry point so it can refresh if
-        // needed
+        // This is called by UncivGame.popScreen - e.g. after City Tab opened a City and the user closes that CityScreen...
+        // Notify the current tab via its IPageExtensions.activated entry point so it can refresh if needed
         val index = tabbedPager.activePage
         val category = EmpireOverviewCategories.entries.getOrNull(index) ?: return
-        pageObjects[category]?.activated(
-                index,
-                "",
-                tabbedPager
-        ) // Fake caption marks this as popScreen-triggered
+        pageObjects[category]?.activated(index, "", tabbedPager) // Fake caption marks this as popScreen-triggered
     }
 }

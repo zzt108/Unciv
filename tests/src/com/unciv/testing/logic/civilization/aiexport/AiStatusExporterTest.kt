@@ -1,6 +1,6 @@
-package com.unciv.testing.logic.civilization
+package com.unciv.testing.logic.civilization.aiexport
 
-import com.unciv.logic.civilization.AiStatusExporter
+import com.unciv.logic.civilization.aiexport.AiStatusExporter
 import com.unciv.models.ruleset.nation.Nation
 import com.unciv.testing.GdxTestRunner
 import com.unciv.testing.TestGame

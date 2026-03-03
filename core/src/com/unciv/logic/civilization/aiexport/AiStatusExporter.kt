@@ -110,13 +110,9 @@ object AiStatusExporter {
         val goldenAgeProgress = "${civ.goldenAges.storedHappiness}/${civ.goldenAges.happinessRequiredForNextGoldenAge()}"
         val goldenAgeStr = if (civ.goldenAges.isGoldenAge()) "Active ($goldenAgeTurns turns remaining)" else "Inactive (Progress: $goldenAgeProgress)"
         val baseRuleset = civ.gameInfo.gameParameters.baseRuleset
-        val activeMods = civ.gameInfo.gameParameters.mods
 
         sb.append("## Global Empire Status\n")
         sb.append("- **Base Ruleset:** $baseRuleset\n")
-        if (activeMods.isNotEmpty()) {
-            sb.append("- **Active Mods:** ${activeMods.joinToString(", ")}\n")
-        }
         sb.append("- **Turn:** $turn\n")
         sb.append("- **Era:** $era\n")
         sb.append("- **Global Happiness:** $happiness\n")
@@ -302,8 +298,9 @@ object AiStatusExporter {
                 val cityFood = city.cityStats.currentCityStats[Stat.Food]
                 val cityProd = city.cityStats.currentCityStats[Stat.Production]
                 val citySci = city.cityStats.currentCityStats[Stat.Science]
+                val builtBuildings = city.cityConstructions.builtBuildings.sorted().joinToString(", ").takeIf { it.isNotEmpty() } ?: "None"
                 sb.append(
-                        "- **${city.name}:** Pop $pop | Building: $prod | Yields: $cityFood Food, $cityProd Prod, $citySci Science\n"
+                        "- **${city.name}:** Pop $pop | Building: $prod | Yields: $cityFood Food, $cityProd Prod, $citySci Science | Built: $builtBuildings\n"
                 )
             }
         }

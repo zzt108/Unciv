@@ -201,4 +201,31 @@ class AiStatusExporterTest {
         assertTrue("Should show unpromoted unit", result.contains("- 1 Worker"))
         assertTrue("Should not show prerequisite promotion", !result.contains("Drill I,") && !result.contains("Drill I)") && !result.contains("Drill II,") && !result.contains("Drill II)"))
     }
+
+    @Test
+    fun testAiExportModifications() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(1)
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+        
+        // Add a building
+        val city = testGame.addCity(civ, testGame.getTile(0, 0))
+        city.name = "Roma"
+        city.cityConstructions.addBuilding("Monument")
+        city.cityConstructions.addBuilding("Granary")
+
+        // Add a mock mod to verify it's NOT in the output
+        civ.gameInfo.gameParameters.mods.add("TestMod")
+
+        val result = AiStatusExporter.generateAiStatusReport(civ)
+
+        // Verify "Active Mods" is NOT present
+        assertTrue("Active Mods should be omitted", !result.contains("Active Mods:"))
+        assertTrue("TestMod should be omitted", !result.contains("TestMod"))
+
+        // Verify Built Buildings are present in city report
+        assertTrue("City report should contain built buildings", result.contains("Built: Granary, Monument"))
+    }
 }

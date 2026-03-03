@@ -228,4 +228,26 @@ class AiStatusExporterTest {
         // Verify Built Buildings are present in city report
         assertTrue("City report should contain built buildings", result.contains("Built: Granary, Monument"))
     }
+
+    @Test
+    fun testSocialPoliciesExport() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(1)
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+        
+        val ruleset = civ.gameInfo.ruleset
+        
+        civ.policies.adopt(ruleset.policies["Tradition"]!!, true)
+        civ.policies.adopt(ruleset.policies["Aristocracy"]!!, true)
+        civ.policies.adopt(ruleset.policies["Oligarchy"]!!, true)
+        
+        civ.policies.adopt(ruleset.policies["Liberty"]!!, true)
+
+        val result = AiStatusExporter.generateAiStatusReport(civ)
+
+        assertTrue("Should denote branch with detailed policies", result.contains("- **Tradition:** Unlocked, 2 policies adopted (Aristocracy, Oligarchy)"))
+        assertTrue("Should denote empty branch", result.contains("- **Liberty:** Unlocked, 0 policies adopted\n") || result.contains("- **Liberty:** Unlocked, 0 policies adopted\r\n"))
+    }
 }

@@ -127,10 +127,11 @@ object AiStatusExporter {
         sb.append("### Active Social Policies\n")
         var hasPolicies = false
         for (branch in civ.gameInfo.ruleset.policyBranches.values) {
-            val adoptedInBranch = branch.policies.count { civ.policies.isAdopted(it.name) }
+            val adoptedPolicies = branch.policies.filter { civ.policies.isAdopted(it.name) }
             val isBranchUnlocked = civ.policies.isAdopted(branch.name)
-            if (isBranchUnlocked || adoptedInBranch > 0) {
-                sb.append("- **${branch.name}:** Unlocked, $adoptedInBranch policies adopted\n")
+            if (isBranchUnlocked || adoptedPolicies.isNotEmpty()) {
+                val policiesStr = if (adoptedPolicies.isNotEmpty()) " (${adoptedPolicies.joinToString(", ") { it.name }})" else ""
+                sb.append("- **${branch.name}:** Unlocked, ${adoptedPolicies.size} policies adopted$policiesStr\n")
                 hasPolicies = true
             }
         }

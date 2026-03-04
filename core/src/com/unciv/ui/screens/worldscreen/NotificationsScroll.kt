@@ -230,7 +230,8 @@ class NotificationsScroll(
         // Detect what to draw and if there's any changes part 1
         if (oneTimeNotification == null && clickedNotification != null)
             oneTimeNotification = clickedNotification  // reselecting can keep a "one-time" in the list
-        val newHash = notifications.hashCode() + oneTimeNotification.hashCode() * 31
+
+        val newHash = updateNotificationsHash(notifications, oneTimeNotification)
 
         // Determine highlight
         coloredHighlight = false

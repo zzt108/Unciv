@@ -15,3 +15,17 @@ internal fun NotificationsScroll.restoreHiddenInCategory(category: Notification.
     if (restored) GUI.setUpdateWorldOnNextRender()
     return restored
 }
+
+/**
+ * Removes stale notifications from hidden set and calculates a composite hash for re-render detection.
+ * Ensures the UI refreshes when hidden state changes.
+ */
+internal fun NotificationsScroll.updateNotificationsHash(
+    notifications: List<Notification>,
+    oneTimeNotification: Notification?
+): Int {
+    hiddenNotifications.retainAll(notifications.toSet())
+    return notifications.hashCode() +
+            oneTimeNotification.hashCode() * 31 +
+            hiddenNotifications.hashCode() * 31 * 31
+}

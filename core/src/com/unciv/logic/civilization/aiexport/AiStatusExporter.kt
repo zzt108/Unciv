@@ -5,6 +5,7 @@ import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.HexMath
 import com.unciv.models.ruleset.tile.TerrainType
 import com.unciv.models.stats.Stat
+import com.unciv.models.translations.tr
 import com.unciv.logic.map.mapunit.MapUnit
 import kotlin.math.atan2
 import kotlin.math.ceil
@@ -298,6 +299,19 @@ object AiStatusExporter {
         }
         sb.append("</tactical_radar>\n")
         sb.append("</map_data>\n\n")
+
+        // Previous Turn Notifications
+        sb.append("<notifications>\n")
+        sb.append("## Previous Turn Notifications\n")
+        val previousTurnNotifications = civ.notificationsLog.lastOrNull { it.turn == turn - 1 }
+        if (previousTurnNotifications == null || previousTurnNotifications.notifications.isEmpty()) {
+            sb.append("- No notifications from the previous turn.\n")
+        } else {
+            for (notification in previousTurnNotifications.notifications) {
+                sb.append("- [${notification.category.name}] ${notification.text.tr()}\n")
+            }
+        }
+        sb.append("</notifications>\n\n")
 
         // City Reports
         sb.append("<city_reports>\n")

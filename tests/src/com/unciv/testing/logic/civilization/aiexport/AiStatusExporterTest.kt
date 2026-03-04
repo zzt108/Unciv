@@ -250,4 +250,45 @@ class AiStatusExporterTest {
         assertTrue("Should denote branch with detailed policies", result.contains("- **Tradition:** Unlocked, 2 policies adopted (Aristocracy, Oligarchy)"))
         assertTrue("Should denote empty branch", result.contains("- **Liberty:** Unlocked, 0 policies adopted\n") || result.contains("- **Liberty:** Unlocked, 0 policies adopted\r\n"))
     }
+
+    @Test
+    fun testNotificationsExport() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(1)
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+        
+        // Advance arbitrary turns so we have a preceding turn
+        civ.gameInfo.turns = 5
+
+        // Check empty log case first
+        var result = AiStatusExporter.generateAiStatusReport(civ)
+        assertTrue("Should include previous turn notifications block", result.contains("<notifications>"))
+        assertTrue("Should denote empty log gracefully", result.contains("- No notifications from the previous turn."))
+
+        // Add a notification to the previous turn (turn 4)
+        val civNotificationsThisTurn = com.unciv.logic.civilization.Civilization.NotificationsLog(civ.gameInfo.turns - 1)
+        civNotificationsThisTurn.notifications.add(
+            com.unciv.logic.civilization.Notification(
+                "Test notification without brackets",
+                emptyArray(),
+                emptyList(),
+                com.unciv.logic.civilization.Notification.NotificationCategory.General
+            )
+        )
+        civ.notificationsLog.add(civNotificationsThisTurn)
+
+        result = AiStatusExporter.generateAiStatusReport(civ)
+
+        assertTrue("Should denote populated block", result.contains("- [General] Test notification without brackets"))
+        
+        // Check ordering
+        val mapIndex = result.indexOf("</map_data>")
+        val notificationsIndex = result.indexOf("<notifications>")
+        val cityReportsIndex = result.indexOf("<city_reports>")
+        
+        assertTrue("Notifications should come after map data", mapIndex < notificationsIndex)
+        assertTrue("Notifications should come before city reports", notificationsIndex < cityReportsIndex)
+    }
 }

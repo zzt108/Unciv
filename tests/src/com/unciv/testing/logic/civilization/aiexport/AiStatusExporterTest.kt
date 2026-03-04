@@ -262,33 +262,48 @@ class AiStatusExporterTest {
         // Advance arbitrary turns so we have a preceding turn
         civ.gameInfo.turns = 5
 
-        // Check empty log case first
+        // Check empty log case first (both current and previous should be empty)
         var result = AiStatusExporter.generateAiStatusReport(civ)
-        assertTrue("Should include previous turn notifications block", result.contains("<notifications>"))
-        assertTrue("Should denote empty log gracefully", result.contains("- No notifications from the previous turn."))
+        assertTrue("Should include notifications block", result.contains("<notifications>"))
+        assertTrue("Should show None for current turn", result.contains("### Current Turn\n- None"))
+        assertTrue("Should show None for previous turn", result.contains("### Previous Turn\n- None"))
 
-        // Add a notification to the previous turn (turn 4)
-        val civNotificationsThisTurn = com.unciv.logic.civilization.Civilization.NotificationsLog(civ.gameInfo.turns - 1)
-        civNotificationsThisTurn.notifications.add(
+        // Add a notification to the current turn (turn 5)
+        civ.notifications.add(
             com.unciv.logic.civilization.Notification(
-                "Test notification without brackets",
+                "Current turn notification",
                 emptyArray(),
                 emptyList(),
                 com.unciv.logic.civilization.Notification.NotificationCategory.General
             )
         )
-        civ.notificationsLog.add(civNotificationsThisTurn)
+
+        // Add a notification to the previous turn (turn 4)
+        val logEntry = com.unciv.logic.civilization.Civilization.NotificationsLog(civ.gameInfo.turns - 1)
+        logEntry.notifications.add(
+            com.unciv.logic.civilization.Notification(
+                "Previous turn notification",
+                emptyArray(),
+                emptyList(),
+                com.unciv.logic.civilization.Notification.NotificationCategory.General
+            )
+        )
+        civ.notificationsLog.add(logEntry)
 
         result = AiStatusExporter.generateAiStatusReport(civ)
 
-        assertTrue("Should denote populated block", result.contains("- [General] Test notification without brackets"))
+        assertTrue("Should include Current Turn header", result.contains("### Current Turn"))
+        assertTrue("Should include Previous Turn header", result.contains("### Previous Turn"))
+        assertTrue("Should show current notification", result.contains("- [General] Current turn notification"))
+        assertTrue("Should show previous notification", result.contains("- [General] Previous turn notification"))
         
         // Check ordering
-        val mapIndex = result.indexOf("</map_data>")
+        val currentHeaderIndex = result.indexOf("### Current Turn")
+        val previousHeaderIndex = result.indexOf("### Previous Turn")
+        assertTrue("Current turn should precede Previous turn", currentHeaderIndex < previousHeaderIndex)
+        
         val notificationsIndex = result.indexOf("<notifications>")
         val cityReportsIndex = result.indexOf("<city_reports>")
-        
-        assertTrue("Notifications should come after map data", mapIndex < notificationsIndex)
         assertTrue("Notifications should come before city reports", notificationsIndex < cityReportsIndex)
     }
 }

@@ -1,6 +1,7 @@
 package com.unciv.logic.civilization.aiexport
 
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.civilization.Notification
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.HexMath
 import com.unciv.models.ruleset.tile.TerrainType
@@ -10,8 +11,14 @@ import com.unciv.logic.map.mapunit.MapUnit
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.max
+import com.unciv.utils.Log
 
 object AiStatusExporter {
+
+    private fun formatNotification(notification: Notification): String {
+        return "- [${notification.category.name}] ${notification.text.tr()}\n"
+    }
+
     /**
      * Generates a Markdown-formatted report of the empire's current layout, stats, and relations in
      * English. Note: Must be called on GL thread as it accesses Stats that may be updated
@@ -300,15 +307,28 @@ object AiStatusExporter {
         sb.append("</tactical_radar>\n")
         sb.append("</map_data>\n\n")
 
-        // Previous Turn Notifications
+        // Notifications
         sb.append("<notifications>\n")
-        sb.append("## Previous Turn Notifications\n")
+        sb.append("## Recent Notifications\n")
+        
+        // Current Turn
+        sb.append("### Current Turn\n")
+        if (civ.notifications.isEmpty()) {
+            sb.append("- None\n")
+        } else {
+            for (notification in civ.notifications) {
+                sb.append(formatNotification(notification))
+            }
+        }
+        
+        // Previous Turn
+        sb.append("### Previous Turn\n")
         val previousTurnNotifications = civ.notificationsLog.lastOrNull { it.turn == turn - 1 }
         if (previousTurnNotifications == null || previousTurnNotifications.notifications.isEmpty()) {
-            sb.append("- No notifications from the previous turn.\n")
+            sb.append("- None\n")
         } else {
             for (notification in previousTurnNotifications.notifications) {
-                sb.append("- [${notification.category.name}] ${notification.text.tr()}\n")
+                sb.append(formatNotification(notification))
             }
         }
         sb.append("</notifications>\n\n")

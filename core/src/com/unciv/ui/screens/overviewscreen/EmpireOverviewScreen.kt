@@ -66,7 +66,8 @@ class EmpireOverviewScreen(
         persistState.update(pageObjects)
 
         val closeButton = getCloseButton { game.popScreen() }
-        tabbedPager.decorateHeader(closeButton)
+        val headerTable = com.unciv.ui.screens.overviewscreen.aiexport.createAiExportHeader(viewingPlayer, closeButton)
+        tabbedPager.decorateHeader(headerTable)
 
         tabbedPager.setFillParent(true)
         stage.addActor(tabbedPager)

@@ -1,0 +1,369 @@
+package com.unciv.logic.civilization.aiexport
+
+import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.map.HexCoord
+import com.unciv.logic.map.HexMath
+import com.unciv.models.ruleset.tile.TerrainType
+import com.unciv.models.stats.Stat
+import com.unciv.models.translations.tr
+import com.unciv.logic.map.mapunit.MapUnit
+import kotlin.math.atan2
+import kotlin.math.ceil
+import kotlin.math.max
+
+object AiStatusExporter {
+    /**
+     * Generates a Markdown-formatted report of the empire's current layout, stats, and relations in
+     * English. Note: Must be called on GL thread as it accesses Stats that may be updated
+     * concurrently.
+     */
+    fun generateAiStatusReport(civ: Civilization, includeSystemContext: Boolean = true): String {
+        if (civ.isSpectator()) {
+            return "Spectator mode - no civilization data available."
+        }
+
+        val sb = StringBuilder()
+        sb.append("<unciv_export>\n")
+        if (includeSystemContext) {
+            sb.append("<system_context>\n")
+            sb.append(
+                    "You are an AI advisor for the game Unciv (an open-source Civilization V clone). "
+            )
+            sb.append("The following data represents the current state of the player's empire. ")
+            sb.append(
+                    "Map coordinates are [x,y] on a hex grid where X increases to the North-West and Y increases to the North-East. "
+            )
+            sb.append("Tactical Radar sections summarize threats and POIs within 3 tiles of cities. ")
+            sb.append("Use this data to provide tactical, economic, and diplomatic advice.\n")
+            sb.append("</system_context>\n\n")
+        }
+
+        sb.append("<global_status>\n")
+        sb.append("# AI Status Report for ${civ.civName}\n\n")
+
+        // Global Empire Status
+        val turn = civ.gameInfo.turns
+        val era = civ.getEra().name
+        val happiness = civ.getHappiness()
+        val totalGold = civ.gold
+        val gpt = civ.stats.statsForNextTurn.gold
+        val science = civ.stats.statsForNextTurn.science
+        val culture = civ.stats.statsForNextTurn.culture
+        val faith = civ.stats.statsForNextTurn.faith
+        val currentResearch = civ.tech.currentTechnologyName()
+        val researchStatus =
+                if (currentResearch != null) {
+                    val remainingCost = civ.tech.remainingScienceToTech(currentResearch).toDouble()
+                    val turnsStr =
+                            if (remainingCost <= 0f) "0"
+                            else if (civ.stats.statsForNextTurn.science <= 0f) "∞"
+                            else
+                                    max(
+                                                    1,
+                                                    ceil(
+                                                                    remainingCost /
+                                                                            civ.stats
+                                                                                    .statsForNextTurn
+                                                                                    .science
+                                                            )
+                                                            .toInt()
+                                            )
+                                            .toString()
+                    "$currentResearch ($turnsStr turns)"
+                } else {
+                    val availableTechs =
+                            civ.gameInfo
+                                    .ruleset
+                                    .technologies
+                                    .values
+                                    .filter { civ.tech.canBeResearched(it.name) }
+                                    .sortedBy { it.column?.columnNumber ?: 0 }
+                                    .map { it.name }
+
+                    val allTechs = civ.gameInfo.ruleset.technologies.values
+                    val childrenByParent = allTechs.flatMap { tech ->
+                        tech.prerequisites.map { it to tech }
+                    }.groupBy({ it.first }, { it.second })
+
+                    val leafTechs =
+                            civ.tech.techsResearched
+                                    .mapNotNull { civ.gameInfo.ruleset.technologies[it] }
+                                    .filter { tech ->
+                                        val descendants = childrenByParent[tech.name]
+                                        descendants == null || descendants.any { !civ.tech.isResearched(it.name) }
+                                    }
+                                    .sortedBy { it.column?.columnNumber ?: 0 }
+                                    .map { it.name }
+
+                    val leafStr = if (leafTechs.isNotEmpty()) "Researched: ${leafTechs.joinToString(", ")}" else ""
+                    val availableStr = if (availableTechs.isNotEmpty()) "Available: ${availableTechs.joinToString(", ")}" else ""
+
+                    val parts = listOf(leafStr, availableStr).filter { it.isNotEmpty() }
+                    if (parts.isEmpty()) {
+                        "None (All technologies researched)"
+                    } else if (availableTechs.isEmpty()) {
+                        "None (All technologies researched. $leafStr)"
+                    } else {
+                        "None (${parts.joinToString(" | ")})"
+                    }
+                }
+
+        val goldenAgeTurns = civ.goldenAges.turnsLeftForCurrentGoldenAge
+        val goldenAgeProgress = "${civ.goldenAges.storedHappiness}/${civ.goldenAges.happinessRequiredForNextGoldenAge()}"
+        val goldenAgeStr = if (civ.goldenAges.isGoldenAge()) "Active ($goldenAgeTurns turns remaining)" else "Inactive (Progress: $goldenAgeProgress)"
+        val baseRuleset = civ.gameInfo.gameParameters.baseRuleset
+
+        sb.append("## Global Empire Status\n")
+        sb.append("- **Base Ruleset:** $baseRuleset\n")
+        sb.append("- **Turn:** $turn\n")
+        sb.append("- **Era:** $era\n")
+        sb.append("- **Global Happiness:** $happiness\n")
+        sb.append("- **Golden Age:** $goldenAgeStr\n")
+        sb.append("- **Total Gold:** $totalGold (GPT: $gpt)\n")
+        sb.append("- **Science:** $science\n")
+        sb.append("- **Culture:** $culture\n")
+        sb.append("- **Faith:** $faith\n")
+        sb.append("- **Current Research:** $researchStatus\n\n")
+
+        // Active Social Policies
+        sb.append("### Active Social Policies\n")
+        var hasPolicies = false
+        for (branch in civ.gameInfo.ruleset.policyBranches.values) {
+            val adoptedPolicies = branch.policies.filter { civ.policies.isAdopted(it.name) }
+            val isBranchUnlocked = civ.policies.isAdopted(branch.name)
+            if (isBranchUnlocked || adoptedPolicies.isNotEmpty()) {
+                val policiesStr = if (adoptedPolicies.isNotEmpty()) " (${adoptedPolicies.joinToString(", ") { it.name }})" else ""
+                sb.append("- **${branch.name}:** Unlocked, ${adoptedPolicies.size} policies adopted$policiesStr\n")
+                hasPolicies = true
+            }
+        }
+        if (!hasPolicies) sb.append("- None\n")
+        sb.append("</global_status>\n\n")
+
+        // Religion & Beliefs
+        val religion = civ.religionManager.religion
+        val majorityReligion = civ.religionManager.getMajorityReligion()
+        
+        if (religion != null || majorityReligion != null) {
+            sb.append("<religion_data>\n")
+            sb.append("## Religion & Beliefs\n")
+            if (religion != null) {
+                val beliefsStr = religion.getAllBeliefsOrdered().map { it.name }.joinToString(", ")
+                val type = if (religion.isPantheon()) "Pantheon" else "Religion"
+                val beliefsFormatted = if (beliefsStr.isNotEmpty()) " ($beliefsStr)" else ""
+                sb.append("- **Founded $type:** ${religion.getReligionDisplayName()}$beliefsFormatted\n")
+            }
+            if (majorityReligion != null && majorityReligion.name != religion?.name) {
+                sb.append("- **Majority Religion:** ${majorityReligion.getReligionDisplayName()}\n")
+            }
+            sb.append("</religion_data>\n\n")
+        }
+
+        // Map Data
+        sb.append("<map_data>\n")
+        sb.append("<points_of_interest>\n")
+        val poiList = mutableListOf<Triple<Int, Boolean, String>>()
+        for (tile in civ.viewableTiles) {
+            val tileNotes = mutableListOf<String>()
+            var priority = 5 // lower is higher priority
+            var alwaysShow = false
+
+            val city = if (tile.isCityCenter()) tile.getCity() else null
+            if (city != null) {
+                tileNotes.add(
+                        "City: ${city.name} (${city.civ.civName}, Pop ${city.population.population})"
+                )
+                if (city.civ == civ) alwaysShow = true
+                priority = minOf(priority, if (city.civ != civ) 0 else 4)
+            }
+
+            val milUnit = tile.militaryUnit
+            if (milUnit != null) {
+                val effectivePromotions = getEffectivePromotions(milUnit, civ)
+                val promotionsStr = if (effectivePromotions.isNotEmpty()) ", ${effectivePromotions.joinToString(", ")}" else ""
+
+                tileNotes.add("${milUnit.name} (${milUnit.civ.civName}$promotionsStr)")
+                if (milUnit.civ == civ) alwaysShow = true
+                priority = minOf(priority, if (milUnit.civ != civ) 1 else 4)
+            }
+
+            val civUnit = tile.civilianUnit
+            if (civUnit != null) {
+                tileNotes.add("${civUnit.name} (${civUnit.civ.civName})")
+                if (civUnit.civ == civ) alwaysShow = true
+                priority = minOf(priority, if (civUnit.civ != civ) 2 else 4)
+            }
+
+            // Workaround: Some natural wonders (like Fountain of Youth) are stored as 
+            // the baseTerrain rather than in the naturalWonder field directly.
+            // tile.isNaturalWonder() only checks the naturalWonder field and will miss them.
+            val naturalWonderName = tile.naturalWonder 
+                ?: tile.allTerrains.firstOrNull { it.type == TerrainType.NaturalWonder }?.name
+
+            if (naturalWonderName != null) {
+                tileNotes.add("Natural Wonder: $naturalWonderName")
+                priority = minOf(priority, 2)
+            }
+
+            val resource = tile.tileResource
+            if (resource != null && civ.canSeeResource(resource)) {
+                tileNotes.add("Resource: ${resource.name}")
+                priority = minOf(priority, if (resource.resourceType.name == "Bonus") 4 else 3)
+            }
+
+            if (tileNotes.isNotEmpty()) {
+                poiList.add(
+                        Triple(
+                                priority,
+                                alwaysShow,
+                                "- `[${tile.position.x},${tile.position.y}]` ${tileNotes.joinToString(" | ")}"
+                        )
+                )
+            }
+        }
+
+        poiList.sortBy { it.first }
+        var poiCount = 0
+        var truncated = false
+        for ((_, alwaysShowItem, text) in poiList) {
+            if (alwaysShowItem || poiCount < 100) {
+                sb.append("$text\n")
+                if (!alwaysShowItem) {
+                    poiCount++
+                }
+            } else {
+                truncated = true
+            }
+        }
+        if (truncated) {
+            sb.append("- *(Output truncated... additional points of interest not shown)*\n")
+        }
+        sb.append("</points_of_interest>\n\n")
+
+        sb.append("<tactical_radar>\n")
+        if (civ.cities.isEmpty()) {
+            sb.append("- No cities founded yet to generate radar.\n")
+        } else {
+            for (city in civ.cities) {
+                sb.append("<city name=\"${city.name}\">\n")
+                val cityTile = city.getCenterTile()
+                for (tile in cityTile.getTilesInDistance(3)) {
+                    if (tile == cityTile) continue
+
+                    var notable = false
+                    val radarNotes = mutableListOf<String>()
+
+                    val milUnit = tile.militaryUnit
+                    if (milUnit != null && milUnit.civ != civ) {
+                        radarNotes.add("${milUnit.name} (${milUnit.civ.civName})")
+                        notable = true
+                    }
+
+                    if (tile.isImpassible()) {
+                        radarNotes.add("Terrain: ${tile.lastTerrain.name}")
+                        notable = true
+                    }
+
+                    val resource = tile.tileResource
+                    if (resource != null && civ.canSeeResource(resource)) {
+                        radarNotes.add("Resource: ${resource.name}")
+                        notable = true
+                    }
+
+                    if (notable) {
+                        val dx = tile.position.x - cityTile.position.x
+                        val dy = tile.position.y - cityTile.position.y
+                        val dist = tile.aerialDistanceTo(cityTile)
+
+                        val worldDiff = HexMath.hex2WorldCoords(HexCoord.of(dx, dy))
+                        val deg =
+                                Math.toDegrees(
+                                        atan2(worldDiff.x.toDouble(), worldDiff.y.toDouble())
+                                )
+                        val dir =
+                                when {
+                                    deg >= -30 && deg < 30 -> "N"
+                                    deg >= 30 && deg < 90 -> "NE"
+                                    deg >= 90 && deg < 150 -> "SE"
+                                    deg >= 150 || deg < -150 -> "S"
+                                    deg >= -150 && deg < -90 -> "SW"
+                                    deg >= -90 && deg < -30 -> "NW"
+                                    else -> "Near"
+                                }
+
+                        sb.append("- **$dir, Dist $dist**: ${radarNotes.joinToString(" | ")}\n")
+                    }
+                }
+                sb.append("</city>\n")
+            }
+        }
+        sb.append("</tactical_radar>\n")
+        sb.append("</map_data>\n\n")
+
+        // Previous Turn Notifications
+        sb.append("<notifications>\n")
+        sb.append("## Previous Turn Notifications\n")
+        val previousTurnNotifications = civ.notificationsLog.lastOrNull { it.turn == turn - 1 }
+        if (previousTurnNotifications == null || previousTurnNotifications.notifications.isEmpty()) {
+            sb.append("- No notifications from the previous turn.\n")
+        } else {
+            for (notification in previousTurnNotifications.notifications) {
+                sb.append("- [${notification.category.name}] ${notification.text.tr()}\n")
+            }
+        }
+        sb.append("</notifications>\n\n")
+
+        // City Reports
+        sb.append("<city_reports>\n")
+        sb.append("## City Reports\n")
+        if (civ.cities.isEmpty()) {
+            sb.append("- No cities founded yet.\n")
+        } else {
+            for (city in civ.cities) {
+                val pop = city.population.population
+                val prod =
+                        city.cityConstructions.currentConstructionName().takeIf { it.isNotEmpty() }
+                                ?: "Nothing"
+                val cityFood = city.cityStats.currentCityStats[Stat.Food]
+                val cityProd = city.cityStats.currentCityStats[Stat.Production]
+                val citySci = city.cityStats.currentCityStats[Stat.Science]
+                val builtBuildings = city.cityConstructions.builtBuildings.sorted().joinToString(", ").takeIf { it.isNotEmpty() } ?: "None"
+                sb.append(
+                        "- **${city.name}:** Pop $pop | Building: $prod | Yields: $cityFood Food, $cityProd Prod, $citySci Science | Built: $builtBuildings\n"
+                )
+            }
+        }
+        sb.append("</city_reports>\n\n")
+
+        // Diplomatic Situation
+        sb.append("<diplomatic_relations>\n")
+        sb.append("## Diplomatic Situation\n")
+        var hasDiplomacy = false
+        for (otherCiv in civ.getKnownCivs()) {
+            if (otherCiv.isBarbarian) continue
+            hasDiplomacy = true
+            val type = if (otherCiv.isCityState) "City-State" else "Major"
+            val status = if (civ.isAtWarWith(otherCiv)) "At War" else "Peace"
+            sb.append("- **${otherCiv.civName}** ($type): $status\n")
+        }
+        if (!hasDiplomacy) sb.append("- No known civilizations.\n")
+        sb.append("</diplomatic_relations>\n\n")
+
+        sb.append("</unciv_export>")
+
+        return sb.toString()
+    }
+
+    private fun getEffectivePromotions(unit: MapUnit, civ: Civilization): List<String> {
+        val allPromotions = unit.promotions.promotions
+        val allPrerequisites = mutableSetOf<String>()
+        val queue = ArrayDeque(allPromotions.flatMap { civ.gameInfo.ruleset.unitPromotions[it]?.prerequisites ?: emptyList() })
+        while (queue.isNotEmpty()) {
+            val p = queue.removeFirst()
+            if (allPrerequisites.add(p)) {
+                queue.addAll(civ.gameInfo.ruleset.unitPromotions[p]?.prerequisites ?: emptyList())
+            }
+        }
+        return allPromotions.filter { it !in allPrerequisites }.sorted()
+    }
+}

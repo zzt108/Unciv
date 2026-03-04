@@ -5,6 +5,7 @@ import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.HexMath
 import com.unciv.models.ruleset.tile.TerrainType
 import com.unciv.models.stats.Stat
+import com.unciv.logic.map.mapunit.MapUnit
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.max
@@ -175,13 +176,16 @@ object AiStatusExporter {
 
             val milUnit = tile.militaryUnit
             if (milUnit != null) {
-                tileNotes.add("Military Unit: ${milUnit.name} (${milUnit.civ.civName})")
+                val effectivePromotions = getEffectivePromotions(milUnit, civ)
+                val promotionsStr = if (effectivePromotions.isNotEmpty()) ", ${effectivePromotions.joinToString(", ")}" else ""
+
+                tileNotes.add("${milUnit.name} (${milUnit.civ.civName}$promotionsStr)")
                 priority = minOf(priority, if (milUnit.civ != civ) 1 else 4)
             }
 
             val civUnit = tile.civilianUnit
             if (civUnit != null) {
-                tileNotes.add("Civilian Unit: ${civUnit.name} (${civUnit.civ.civName})")
+                tileNotes.add("${civUnit.name} (${civUnit.civ.civName})")
                 priority = minOf(priority, if (civUnit.civ != civ) 2 else 4)
             }
 
@@ -240,7 +244,7 @@ object AiStatusExporter {
 
                     val milUnit = tile.militaryUnit
                     if (milUnit != null && milUnit.civ != civ) {
-                        radarNotes.add("Enemy Unit: ${milUnit.name} (${milUnit.civ.civName})")
+                        radarNotes.add("${milUnit.name} (${milUnit.civ.civName})")
                         notable = true
                     }
 
@@ -307,34 +311,6 @@ object AiStatusExporter {
         }
         sb.append("</city_reports>\n\n")
 
-        // Military & Civilians
-        sb.append("<military_units>\n")
-        sb.append("## Military & Civilians\n")
-        if (civ.units.getCivUnitsSize() == 0) {
-            sb.append("- No units.\n")
-        } else {
-            val unitCounts = HashMap<String, Int>()
-            for (unit in civ.units.getCivUnits()) {
-                val allPromotions = unit.promotions.promotions
-                val allPrerequisites = mutableSetOf<String>()
-                val queue = ArrayDeque(allPromotions.flatMap { civ.gameInfo.ruleset.unitPromotions[it]?.prerequisites ?: emptyList() })
-                while (queue.isNotEmpty()) {
-                    val p = queue.removeFirst()
-                    if (allPrerequisites.add(p)) {
-                        queue.addAll(civ.gameInfo.ruleset.unitPromotions[p]?.prerequisites ?: emptyList())
-                    }
-                }
-                val effectivePromotions = allPromotions.filter { it !in allPrerequisites }.sorted()
-                val promotionsStr = if (effectivePromotions.isNotEmpty()) " (${effectivePromotions.joinToString(", ")})" else ""
-                val name = unit.name + promotionsStr
-                unitCounts[name] = (unitCounts[name] ?: 0) + 1
-            }
-            for ((name, count) in unitCounts) {
-                sb.append("- $count $name\n")
-            }
-        }
-        sb.append("</military_units>\n\n")
-
         // Diplomatic Situation
         sb.append("<diplomatic_relations>\n")
         sb.append("## Diplomatic Situation\n")
@@ -352,5 +328,18 @@ object AiStatusExporter {
         sb.append("</unciv_export>")
 
         return sb.toString()
+    }
+
+    private fun getEffectivePromotions(unit: MapUnit, civ: Civilization): List<String> {
+        val allPromotions = unit.promotions.promotions
+        val allPrerequisites = mutableSetOf<String>()
+        val queue = ArrayDeque(allPromotions.flatMap { civ.gameInfo.ruleset.unitPromotions[it]?.prerequisites ?: emptyList() })
+        while (queue.isNotEmpty()) {
+            val p = queue.removeFirst()
+            if (allPrerequisites.add(p)) {
+                queue.addAll(civ.gameInfo.ruleset.unitPromotions[p]?.prerequisites ?: emptyList())
+            }
+        }
+        return allPromotions.filter { it !in allPrerequisites }.sorted()
     }
 }

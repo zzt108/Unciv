@@ -82,12 +82,12 @@ class AiStatusExporterTest {
 
         val result = AiStatusExporter.generateAiStatusReport(civ)
 
-        assertTrue(result.contains("**N, Dist 1**: Enemy Unit: Warrior_N"))
-        assertTrue(result.contains("**NE, Dist 1**: Enemy Unit: Warrior_NE"))
-        assertTrue(result.contains("**SE, Dist 1**: Enemy Unit: Warrior_SE"))
-        assertTrue(result.contains("**S, Dist 1**: Enemy Unit: Warrior_S"))
-        assertTrue(result.contains("**SW, Dist 1**: Enemy Unit: Warrior_SW"))
-        assertTrue(result.contains("**NW, Dist 1**: Enemy Unit: Warrior_NW"))
+        assertTrue(result.contains("**N, Dist 1**: Warrior_N (Barbarians)"))
+        assertTrue(result.contains("**NE, Dist 1**: Warrior_NE (Barbarians)"))
+        assertTrue(result.contains("**SE, Dist 1**: Warrior_SE (Barbarians)"))
+        assertTrue(result.contains("**S, Dist 1**: Warrior_S (Barbarians)"))
+        assertTrue(result.contains("**SW, Dist 1**: Warrior_SW (Barbarians)"))
+        assertTrue(result.contains("**NW, Dist 1**: Warrior_NW (Barbarians)"))
     }
 
     @Test
@@ -196,9 +196,9 @@ class AiStatusExporterTest {
 
         val result = AiStatusExporter.generateAiStatusReport(civ)
 
-        assertTrue("Should group and show effective promotions", result.contains("- 1 Warrior (Drill III)"))
-        assertTrue("Should show single promotion", result.contains("- 1 Archer (Accuracy I)"))
-        assertTrue("Should show unpromoted unit", result.contains("- 1 Worker"))
+        assertTrue("Should group and show effective promotions", result.contains("Warrior (Rome, Drill III)"))
+        assertTrue("Should show single promotion", result.contains("Archer (Rome, Accuracy I)"))
+        assertTrue("Should show unpromoted unit", result.contains("Worker (Rome)"))
         assertTrue("Should not show prerequisite promotion", !result.contains("Drill I,") && !result.contains("Drill I)") && !result.contains("Drill II,") && !result.contains("Drill II)"))
     }
 

@@ -161,16 +161,18 @@ object AiStatusExporter {
         // Map Data
         sb.append("<map_data>\n")
         sb.append("<points_of_interest>\n")
-        val poiList = mutableListOf<Pair<Int, String>>()
+        val poiList = mutableListOf<Triple<Int, Boolean, String>>()
         for (tile in civ.viewableTiles) {
             val tileNotes = mutableListOf<String>()
             var priority = 5 // lower is higher priority
+            var alwaysShow = false
 
             val city = if (tile.isCityCenter()) tile.getCity() else null
             if (city != null) {
                 tileNotes.add(
                         "City: ${city.name} (${city.civ.civName}, Pop ${city.population.population})"
                 )
+                if (city.civ == civ) alwaysShow = true
                 priority = minOf(priority, if (city.civ != civ) 0 else 4)
             }
 
@@ -180,12 +182,14 @@ object AiStatusExporter {
                 val promotionsStr = if (effectivePromotions.isNotEmpty()) ", ${effectivePromotions.joinToString(", ")}" else ""
 
                 tileNotes.add("${milUnit.name} (${milUnit.civ.civName}$promotionsStr)")
+                if (milUnit.civ == civ) alwaysShow = true
                 priority = minOf(priority, if (milUnit.civ != civ) 1 else 4)
             }
 
             val civUnit = tile.civilianUnit
             if (civUnit != null) {
                 tileNotes.add("${civUnit.name} (${civUnit.civ.civName})")
+                if (civUnit.civ == civ) alwaysShow = true
                 priority = minOf(priority, if (civUnit.civ != civ) 2 else 4)
             }
 
@@ -208,8 +212,9 @@ object AiStatusExporter {
 
             if (tileNotes.isNotEmpty()) {
                 poiList.add(
-                        Pair(
+                        Triple(
                                 priority,
+                                alwaysShow,
                                 "- `[${tile.position.x},${tile.position.y}]` ${tileNotes.joinToString(" | ")}"
                         )
                 )
@@ -218,14 +223,19 @@ object AiStatusExporter {
 
         poiList.sortBy { it.first }
         var poiCount = 0
-        for ((_, text) in poiList) {
-            if (poiCount < 50) {
+        var truncated = false
+        for ((_, alwaysShowItem, text) in poiList) {
+            if (alwaysShowItem || poiCount < 100) {
                 sb.append("$text\n")
-                poiCount++
-            } else if (poiCount == 50) {
-                sb.append("- *(Output truncated... additional points of interest not shown)*\n")
-                poiCount++
+                if (!alwaysShowItem) {
+                    poiCount++
+                }
+            } else {
+                truncated = true
             }
+        }
+        if (truncated) {
+            sb.append("- *(Output truncated... additional points of interest not shown)*\n")
         }
         sb.append("</points_of_interest>\n\n")
 

@@ -5,6 +5,7 @@ import com.unciv.logic.civilization.Notification
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.HexMath
 import com.unciv.models.ruleset.tile.TerrainType
+import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.stats.Stat
 import com.unciv.models.translations.tr
 import com.unciv.logic.map.mapunit.MapUnit
@@ -12,6 +13,7 @@ import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.max
 import com.unciv.utils.Log
+import com.unciv.Constants
 
 object AiStatusExporter {
 
@@ -146,6 +148,40 @@ object AiStatusExporter {
         }
         if (!hasPolicies) sb.append("- None\n")
         sb.append("</global_status>\n\n")
+
+        // Resources Overview
+        sb.append("<resources_overview>\n")
+        sb.append("## Resources Overview\n")
+        val tradablePerTurn = civ.getPerTurnResourcesWithOriginsForTrade().filter { it.origin == Constants.tradable }
+        val tradableStockpiled = civ.getStockpiledResourcesForTrade()
+        
+        val resourceList = civ.gameInfo.ruleset.tileResources.values
+            .filter { it.resourceType == ResourceType.Strategic || it.resourceType == ResourceType.Luxury }
+            .sortedWith(compareBy({ it.resourceType }, { it.name }))
+            
+        var hasResources = false
+        for (resource in resourceList) {
+            val totalAvailable = if (resource.isStockpiled) {
+                civ.getResourceAmount(resource)
+            } else {
+                civ.detailedCivResources.sumBy(resource)
+            }
+            
+            val tradeable = if (resource.isStockpiled) {
+                tradableStockpiled.firstOrNull { it.resource == resource }?.amount ?: 0
+            } else {
+                tradablePerTurn.firstOrNull { it.resource == resource }?.amount ?: 0
+            }
+            
+            // Show if we have any available, or if it's tradable, or if it's a known strategic/luxury resource
+            val isKnownResource = civ.canSeeResource(resource)
+            if (totalAvailable > 0 || tradeable > 0 || isKnownResource) {
+                hasResources = true
+                sb.append("- **${resource.name}** (${resource.resourceType}): $totalAvailable available | $tradeable tradeable\n")
+            }
+        }
+        if (!hasResources) sb.append("- None available.\n")
+        sb.append("</resources_overview>\n\n")
 
         // Religion & Beliefs
         val religion = civ.religionManager.religion

@@ -306,4 +306,54 @@ class AiStatusExporterTest {
         val cityReportsIndex = result.indexOf("<city_reports>")
         assertTrue("Notifications should come before city reports", notificationsIndex < cityReportsIndex)
     }
+
+    @Test
+    fun testResourcesExport() {
+        val testGame = TestGame()
+        testGame.makeHexagonalMap(2) // Need a bit more space for cities and tiles
+        val nation = Nation()
+        nation.name = "Rome"
+        val civ = testGame.addCiv(nation)
+        
+        // Setup a city to own the tiles
+        val cityTile = testGame.getTile(0, 0)
+        val city = testGame.addCity(civ, cityTile)
+        city.name = "Roma"
+
+        // Place Iron on a tile and improve it
+        val ironTile = testGame.getTile(1, 0)
+        ironTile.baseTerrain = "Grassland"
+        ironTile.resource = "Iron"
+        ironTile.resourceAmount = 2
+        ironTile.improvement = "Mine"
+        ironTile.setOwner(city)
+        ironTile.setTerrainTransients()
+
+        // Place Horses on a tile but don't improve it (so we have a known resource with 0 amount)
+        val horseTile = testGame.getTile(0, 1)
+        horseTile.baseTerrain = "Plains"
+        horseTile.resource = "Horses"
+        horseTile.resourceAmount = 4
+        horseTile.setOwner(city)
+        horseTile.setTerrainTransients()
+        
+        // Give the tech needed so they are "visible"
+        civ.tech.techsResearched.add("Iron Working") 
+        civ.tech.techsResearched.add("Animal Husbandry")
+
+        // Force a cache update to calculate detailedCivResources from the tiles
+        civ.updateStatsForNextTurn()
+        civ.cache.updateCivResources()
+        
+        val result = AiStatusExporter.generateAiStatusReport(civ)
+        
+        assertTrue("Should contain resources_overview tag", result.contains("<resources_overview>"))
+        assertTrue("Should contain Iron", result.contains("Iron"))
+        assertTrue("Should contain Horses", result.contains("Horses"))
+        assertTrue("Iron should have 2 available", result.contains("- **Iron** (Strategic): 2 available"))
+        assertTrue("Horses should have 0 available", result.contains("- **Horses** (Strategic): 0 available"))
+        
+        // Verify Marble (Luxury) is NOT there by default if 0 and not discovered strategic
+        assertTrue("Should not contain Marble if 0", !result.contains("Marble"))
+    }
 }
